@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from 'react'
-import { useSession } from 'next-auth/react'
+import { useSession, signIn } from 'next-auth/react'
 
 interface Message {
   id: string
@@ -25,6 +25,7 @@ export default function TestChatInterface() {
   const [isLoading, setIsLoading] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
   const [isSyncingContacts, setIsSyncingContacts] = useState(false)
+  const [isPolling, setIsPolling] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -167,6 +168,41 @@ export default function TestChatInterface() {
     }
   }
 
+  const handlePollEmails = async () => {
+    setIsPolling(true)
+    try {
+      const response = await fetch('/api/proactive/poll-emails', {
+        method: 'POST'
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to poll emails')
+      }
+
+      const data = await response.json()
+      
+      const pollMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: `🤖 Checked for new emails! The proactive agent has processed any new messages according to your ongoing instructions.`,
+        timestamp: new Date()
+      }
+      
+      setMessages(prev => [...prev, pollMessage])
+    } catch (error) {
+      console.error('Poll error:', error)
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: "❌ Failed to poll emails.",
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, errorMessage])
+    } finally {
+      setIsPolling(false)
+    }
+  }
+
   // Show loading state
   if (status === 'loading') {
     return (
@@ -181,17 +217,38 @@ export default function TestChatInterface() {
 
   // Show sign-in page if not authenticated
   if (!session) {
+    // Check if there's an error in the URL
+    const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+    const error = urlParams?.get('error')
+    
+    const handleSignIn = () => {
+      signIn('google', { callbackUrl: '/dashboard' })
+    }
+    
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
+        <div className="text-center max-w-md">
           <h1 className="text-2xl font-bold text-gray-900 mb-4">Welcome to Ask Anything</h1>
           <p className="text-gray-600 mb-8">Please sign in with Google to access your financial advisor AI assistant</p>
-          <a 
-            href="/api/auth/signin"
+          
+          {error && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md text-left">
+              <h3 className="text-sm font-semibold text-red-800 mb-2">Sign-in Error</h3>
+              <p className="text-sm text-red-700 mb-2">Error: {error}</p>
+              <p className="text-xs text-red-600">
+                Please make sure:
+                <br />• Your Google OAuth redirect URI is set to: <code className="bg-red-100 px-1">http://localhost:3000/api/auth/callback/google</code>
+                <br />• You've added webshookeng@gmail.com as a test user in Google Cloud Console
+              </p>
+            </div>
+          )}
+          
+          <button 
+            onClick={handleSignIn}
             className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
           >
             Sign in with Google
-          </a>
+          </button>
         </div>
       </div>
     )
@@ -217,6 +274,13 @@ export default function TestChatInterface() {
                   className="text-sm px-3 py-1 bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded transition-colors"
                 >
                   {isSyncingContacts ? 'Syncing...' : '👥 Sync Contacts'}
+                </button>
+                <button
+                  onClick={handlePollEmails}
+                  disabled={isPolling}
+                  className="text-sm px-3 py-1 bg-purple-600 text-white hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded transition-colors"
+                >
+                  {isPolling ? 'Checking...' : '🤖 Check New Emails'}
                 </button>
                 <div className="text-sm text-gray-500">
                   Welcome, {session.user?.name || session.user?.email}

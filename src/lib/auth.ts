@@ -40,10 +40,24 @@ export const authOptions: NextAuthOptions = {
       session.expiresAt = token.expiresAt as number
       return session
     },
+    async signIn({ account, profile }) {
+      console.log('Sign in callback:', { account, profile })
+      return true
+    },
+  },
+  pages: {
+    signIn: "/",
+    error: "/", // Redirect errors to home page
   },
   debug: true, // Enable debug mode
   session: {
     strategy: "jwt",
+  },
+  useSecureCookies: false, // Important for localhost HTTP
+  events: {
+    async signIn({ user, account }) {
+      console.log('Sign in event:', { user, account })
+    },
   },
 }
 

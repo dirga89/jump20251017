@@ -61,10 +61,15 @@ export default function Dashboard() {
       })
       
       if (response.ok) {
-        await fetchUserData() // Refresh data
+        // Refresh data after successful sync
+        await fetchUserData()
+      } else {
+        throw new Error(`Failed to sync ${type}`)
       }
     } catch (error) {
       console.error(`Error syncing ${type}:`, error)
+      // Only show alert for errors
+      alert(`❌ Failed to sync ${type}. Please try again.`)
     } finally {
       setIsSyncing(false)
     }
@@ -96,12 +101,39 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 relative">
+      {/* Syncing Overlay */}
+      {isSyncing && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+          <div className="bg-white rounded-lg p-8 max-w-md text-center">
+            <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto mb-4"></div>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Syncing Data...</h3>
+            <p className="text-gray-600">This may take 1-2 minutes. Please wait.</p>
+            <p className="text-sm text-gray-500 mt-2">Do not close this page.</p>
+          </div>
+        </div>
+      )}
+      
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
           <p className="text-gray-600 mt-2">Welcome back, {session?.user?.name}</p>
+          
+          {/* Instructions Banner */}
+          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <h3 className="text-sm font-semibold text-blue-900 mb-2">🚀 Getting Started</h3>
+            <p className="text-sm text-blue-800">
+              Before chatting with your AI assistant, please sync your data below. This allows the AI to access your emails, contacts, and calendar.
+            </p>
+            <ol className="mt-2 text-sm text-blue-800 list-decimal list-inside space-y-1">
+              <li>Click <strong>Sync Emails</strong> to import Gmail messages</li>
+              <li>Click <strong>Sync Calendar</strong> to import events</li>
+              <li>Connect HubSpot and click <strong>Sync Contacts</strong></li>
+              <li>Wait for syncing to complete (may take 1-2 minutes)</li>
+              <li>Go to <strong>Start Chatting</strong> when ready!</li>
+            </ol>
+          </div>
         </div>
 
         {/* Connection Status */}
