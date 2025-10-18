@@ -1,0 +1,286 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // User integrations
+  hubspotConnected Boolean @default(false)
+  hubspotAccessToken String?
+  hubspotRefreshToken String?
+  hubspotExpiresAt DateTime?
+  
+  // User settings and ongoing instructions
+  ongoingInstructions OngoingInstruction[]
+  
+  // User's data
+  emails       Email[]
+  contacts     Contact[]
+  calendarEvents CalendarEvent[]
+  tasks        Task[]
+  conversations Conversation[]
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// RAG System Models
+model Email {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  gmailId     String   @unique
+  threadId    String
+  subject     String
+  sender      String
+  recipient   String
+  body        String   @db.Text
+  htmlBody    String?  @db.Text
+  date        DateTime
+  labels      String[] // Gmail labels
+  isRead      Boolean  @default(false)
+  
+  // Vector embedding for RAG
+  embedding   Unsupported("vector(1536)")? // OpenAI ada-002 embedding
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId, date])
+  @@index([userId, sender])
+}
+
+model Contact {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  hubspotId   String   @unique
+  email       String?
+  firstName   String?
+  lastName    String?
+  phone       String?
+  company     String?
+  jobTitle    String?
+  notes       String?  @db.Text
+  
+  // Vector embedding for RAG
+  embedding   Unsupported("vector(1536)")? // OpenAI ada-002 embedding
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  notes_rel   ContactNote[]
+  
+  @@index([userId, email])
+  @@index([userId, hubspotId])
+}
+
+model ContactNote {
+  id          String   @id @default(cuid())
+  userId      String
+  contactId   String
+  contact     Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  
+  hubspotId   String   @unique
+  note        String   @db.Text
+  createdAt   DateTime @default(now())
+  
+  // Vector embedding for RAG
+  embedding   Unsupported("vector(1536)")? // OpenAI ada-002 embedding
+  
+  @@index([userId, contactId])
+}
+
+model CalendarEvent {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  googleId    String   @unique
+  title       String
+  description String?  @db.Text
+  startTime   DateTime
+  endTime     DateTime
+  attendees   String[] // Email addresses
+  location    String?
+  status      String   // confirmed, tentative, cancelled
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId, startTime])
+}
+
+// Task Management System
+model Task {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  title       String
+  description String?  @db.Text
+  status      TaskStatus @default(PENDING)
+  priority    Priority @default(MEDIUM)
+  
+  // Task context and memory
+  context     Json?    // Store task-specific context
+  result      String?  @db.Text // Store task result
+  error       String?  @db.Text // Store error if task failed
+  
+  // Task execution tracking
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Related entities
+  relatedEmails String[] // Email IDs this task is related to
+  relatedContacts String[] // Contact IDs this task is related to
+  relatedEvents String[] // Calendar event IDs this task is related to
+  
+  @@index([userId, status])
+  @@index([userId, createdAt])
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  WAITING_FOR_RESPONSE
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// Ongoing Instructions System
+model OngoingInstruction {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  instruction String   @db.Text
+  isActive    Boolean  @default(true)
+  triggerType TriggerType // What triggers this instruction
+  conditions  Json?    // Additional conditions for when to trigger
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId, isActive])
+}
+
+enum TriggerType {
+  NEW_EMAIL
+  NEW_CONTACT
+  NEW_CALENDAR_EVENT
+  EMAIL_RESPONSE
+  CALENDAR_RESPONSE
+  HUBSPOT_UPDATE
+}
+
+// Chat Interface
+model Conversation {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  title       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  messages    Message[]
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  role           MessageRole
+  content        String   @db.Text
+  metadata       Json?    // Store additional message metadata
+  
+  createdAt      DateTime @default(now())
+  
+  @@index([conversationId, createdAt])
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+// Webhook tracking
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  userId      String
+  
+  source      String   // gmail, hubspot, calendar
+  eventType   String   // event type from the webhook
+  payload     Json     // Full webhook payload
+  processed   Boolean  @default(false)
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([userId, processed])
+  @@index([source, createdAt])
+}
