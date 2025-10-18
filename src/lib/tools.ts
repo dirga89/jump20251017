@@ -309,7 +309,17 @@ export class ToolService {
     try {
       switch (toolCall.name) {
         case 'search_emails':
-          return await this.rag.searchEmails(userId, toolCall.arguments.query, toolCall.arguments.limit || 5)
+          // Try RAG search first, fall back to Gmail API search
+          try {
+            const ragResults = await this.rag.searchEmails(userId, toolCall.arguments.query, toolCall.arguments.limit || 5)
+            if (Array.isArray(ragResults) && ragResults.length > 0) {
+              return ragResults
+            }
+          } catch (error) {
+            console.log('RAG search failed, using Gmail API fallback:', error)
+          }
+          // Fallback to Gmail API direct search
+          return await this.gmail.searchEmails(userId, toolCall.arguments.query, toolCall.arguments.limit || 10)
 
         case 'search_contacts':
           return await this.rag.searchContacts(userId, toolCall.arguments.query, toolCall.arguments.limit || 5)
@@ -336,9 +346,12 @@ export class ToolService {
 
         case 'create_calendar_event':
           return await this.calendar.createEvent(userId, {
-            ...toolCall.arguments,
+            title: toolCall.arguments.title,
+            description: toolCall.arguments.description,
             startTime: new Date(toolCall.arguments.startTime),
-            endTime: new Date(toolCall.arguments.endTime)
+            endTime: new Date(toolCall.arguments.endTime),
+            attendees: toolCall.arguments.attendees,
+            location: toolCall.arguments.location
           })
 
         case 'find_available_time_slots':

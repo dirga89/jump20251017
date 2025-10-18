@@ -1,7 +1,5 @@
 import { NextAuthOptions } from "next-auth"
 import GoogleProvider from "next-auth/providers/google"
-import { PrismaAdapter } from "@auth/prisma-adapter"
-import { prisma } from "./prisma"
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -12,21 +10,20 @@ export const authOptions: NextAuthOptions = {
         params: {
           scope: [
             "openid",
-            "email",
+            "email", 
             "profile",
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/gmail.send",
             "https://www.googleapis.com/auth/calendar.readonly",
             "https://www.googleapis.com/auth/calendar.events"
-          ].join(" "),
-          access_type: "offline",
-          prompt: "consent"
+          ].join(" ")
         }
       }
     })
   ],
   callbacks: {
     async jwt({ token, account, user }) {
+      // Store the access token for API calls
       if (account) {
         token.accessToken = account.access_token
         token.refreshToken = account.refresh_token
@@ -35,13 +32,16 @@ export const authOptions: NextAuthOptions = {
       return token
     },
     async session({ session, token }) {
+      // Send properties to the client
       session.accessToken = token.accessToken as string
       session.refreshToken = token.refreshToken as string
       session.expiresAt = token.expiresAt as number
       return session
     },
   },
-  debug: true, // Enable debug mode
+  pages: {
+    signIn: "/",
+  },
   session: {
     strategy: "jwt",
   },

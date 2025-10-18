@@ -1,4 +1,6 @@
-// Simplified schema without pgvector for testing
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -72,7 +74,7 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
-// Simplified models without vector embeddings
+// RAG System Models
 model Email {
   id          String   @id @default(cuid())
   userId      String
@@ -88,6 +90,9 @@ model Email {
   date        DateTime
   labels      String[] // Gmail labels
   isRead      Boolean  @default(false)
+  
+  // Vector embedding for RAG
+  embedding   Unsupported("vector(1536)")? // OpenAI ada-002 embedding
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -110,6 +115,9 @@ model Contact {
   jobTitle    String?
   notes       String?  @db.Text
   
+  // Vector embedding for RAG
+  embedding   Unsupported("vector(1536)")? // OpenAI ada-002 embedding
+  
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
@@ -129,6 +137,9 @@ model ContactNote {
   hubspotId   String   @unique
   note        String   @db.Text
   createdAt   DateTime @default(now())
+  
+  // Vector embedding for RAG
+  embedding   Unsupported("vector(1536)")? // OpenAI ada-002 embedding
   
   @@index([userId, contactId])
 }
@@ -240,7 +251,6 @@ model Conversation {
 }
 
 model Message {
-	
   id             String   @id @default(cuid())
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)

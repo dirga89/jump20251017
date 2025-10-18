@@ -24,28 +24,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 })
     }
 
-    // Get user from database
-    const user = await prisma.user.findUnique({
+    // Get or create user from database
+    let user = await prisma.user.findUnique({
       where: { email: session.user.email }
     })
 
     if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+      // Create user if doesn't exist
+      user = await prisma.user.create({
+        data: {
+          email: session.user.email,
+          name: session.user.name,
+          image: session.user.image,
+          emailVerified: new Date()
+        }
+      })
     }
 
-    // Initialize services (these would need proper token management in production)
+    // Initialize services with proper token management
     const toolService = new ToolService(
       session.accessToken || '',
       user.hubspotAccessToken || '',
       session.accessToken || ''
     )
     
-    const ragService = new RAGService()
+    // const ragService = new RAGService()
 
     // Get available tools
     const tools = toolService.getAvailableTools()
     const toolDefinitions = tools.map(tool => ({
-      type: 'function',
+      type: 'function' as const,
       function: {
         name: tool.name,
         description: tool.description,
@@ -54,7 +62,7 @@ export async function POST(request: NextRequest) {
     }))
 
     // Get context using RAG
-    const context = await ragService.getContextForQuery(user.id, message)
+    // const context = await ragService.getContextForQuery(user.id, message)
 
     // Create or get conversation
     let conversation = await prisma.conversation.findUnique({
@@ -80,7 +88,7 @@ export async function POST(request: NextRequest) {
 
     // Build message history for OpenAI
     const messageHistory = recentMessages.reverse().map(msg => ({
-      role: msg.role as 'user' | 'assistant' | 'system',
+      role: msg.role.toLowerCase() as 'user' | 'assistant' | 'system',
       content: msg.content
     }))
 
@@ -94,126 +102,133 @@ export async function POST(request: NextRequest) {
     await prisma.message.create({
       data: {
         conversationId: conversation.id,
-        role: 'user',
+        role: 'USER',
         content: message
       }
     })
 
-    // Call OpenAI with tools
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4-turbo-preview",
-      messages: [
+    // Call OpenAI - with error handling
+    let assistantMessage: string
+    let metadata: any = {}
+    
+    try {
+      const completion = await openai.chat.completions.create({
+        model: "gpt-3.5-turbo",
+        messages: [
         {
           role: "system",
-          content: `You are an AI assistant for financial advisors. You have access to their Gmail, Google Calendar, and HubSpot CRM data through various tools.
+          content: `You are an AI assistant for financial advisors with access to Gmail, Google Calendar, and HubSpot CRM.
 
-Context from user's data:
-${context.summary}
+IMPORTANT: You now have access to the user's Gmail account (${session.user.email}). When users ask about their emails, you MUST use the search_emails tool to access them.
 
-Available tools: ${tools.map(t => t.name).join(', ')}
+Available tools:
+- search_emails: Search through Gmail messages
+- send_email: Send emails via Gmail
+- search_contacts: Search HubSpot contacts
+- create_contact: Add new HubSpot contact
+- get_upcoming_events: Get calendar events
+- create_calendar_event: Schedule meetings
 
-When users ask questions, use the search tools to find relevant information from their emails, contacts, and notes.
-When users ask you to do things, use the appropriate tools to complete the tasks.
-Be professional, helpful, and concise in your responses.`
+When users ask about emails, USE THE TOOLS! Call search_emails to find their emails. Don't say you can't access them - you have the tools to do it!
+
+Be helpful and proactive about using your tools to answer questions.`
         },
-        ...messageHistory
-      ],
-      tools: toolDefinitions,
-      tool_choice: "auto",
-      max_tokens: 1000,
-      temperature: 0.7,
-    })
-
-    let assistantMessage = completion.choices[0]?.message?.content || "I'm sorry, I couldn't process your request."
-    let metadata: any = {}
-
-    // Handle tool calls
-    if (completion.choices[0]?.message?.tool_calls) {
-      const toolCalls = completion.choices[0].message.tool_calls
-      
-      for (const toolCall of toolCalls) {
-        try {
-          const result = await toolService.executeTool(user.id, {
-            name: toolCall.function.name,
-            arguments: JSON.parse(toolCall.function.arguments)
-          })
-          
-          // Add tool result to metadata
-          metadata[toolCall.function.name] = result
-        } catch (error) {
-          console.error(`Tool execution error:`, error)
-          metadata[toolCall.function.name] = { error: error.message }
-        }
-      }
-
-      // Generate final response with tool results
-      const finalCompletion = await openai.chat.completions.create({
-        model: "gpt-4-turbo-preview",
-        messages: [
-          {
-            role: "system",
-            content: "Provide a helpful response based on the tool results. Be conversational and helpful."
-          },
-          {
-            role: "user",
-            content: `Original question: ${message}\n\nTool results: ${JSON.stringify(metadata)}`
-          }
+          ...messageHistory
         ],
-        max_tokens: 500,
+        tools: toolDefinitions,
+        tool_choice: "auto",
+        max_tokens: 1000,
         temperature: 0.7,
       })
 
-      assistantMessage = finalCompletion.choices[0]?.message?.content || assistantMessage
+      assistantMessage = completion.choices[0]?.message?.content || "I'm sorry, I couldn't process your request."
+      
+      // Handle tool calls
+      if (completion.choices[0]?.message?.tool_calls) {
+        const toolCalls = completion.choices[0].message.tool_calls
+        
+        console.log(`🔧 AI requested ${toolCalls.length} tool calls`)
+        
+        for (const toolCall of toolCalls) {
+          try {
+            if (toolCall.type === 'function' && toolCall.function) {
+              console.log(`🔨 Executing tool: ${toolCall.function.name}`)
+              console.log(`📝 Arguments: ${toolCall.function.arguments}`)
+              
+              const result = await toolService.executeTool(user.id, {
+                name: toolCall.function.name,
+                arguments: JSON.parse(toolCall.function.arguments)
+              })
+              
+              console.log(`✅ Tool result:`, result)
+              
+              // Add tool result to metadata
+              metadata[toolCall.function.name] = result
+            }
+          } catch (error: any) {
+            console.error(`❌ Tool execution error:`, error)
+            if (toolCall.type === 'function' && toolCall.function) {
+              metadata[toolCall.function.name] = { error: error.message }
+            }
+          }
+        }
+
+        // Generate final response with tool results
+        const finalCompletion = await openai.chat.completions.create({
+          model: "gpt-3.5-turbo",
+          messages: [
+            {
+              role: "system",
+              content: "Based on the tool results, provide a helpful and conversational response to the user. Summarize what you found in a natural way."
+            },
+            {
+              role: "user",
+              content: `Original question: ${message}\n\nTool results: ${JSON.stringify(metadata, null, 2)}`
+            }
+          ],
+          max_tokens: 500,
+          temperature: 0.7,
+        })
+
+        assistantMessage = finalCompletion.choices[0]?.message?.content || assistantMessage
+      }
+    } catch (error: any) {
+      console.error('OpenAI API error:', error)
+      
+      // Provide helpful error message
+      if (error.status === 429 || error.code === 'insufficient_quota') {
+        assistantMessage = `⚠️ **OpenAI API Quota Exceeded**
+
+To enable the full AI agent functionality, please:
+
+1. Visit: https://platform.openai.com/account/billing
+2. Add credits to your account (minimum $5)
+3. The AI agent will then be able to:
+   - Read and search your Gmail emails
+   - Schedule appointments on Google Calendar
+   - Manage HubSpot contacts and notes
+   - Answer questions about your clients
+   - Automate tasks based on your requests
+
+Once you add credits, just refresh and try again!`
+      } else {
+        assistantMessage = `Error: ${error.message || 'Unable to connect to OpenAI'}. Please check your API key configuration.`
+      }
     }
 
     // Store assistant message
     await prisma.message.create({
       data: {
         conversationId: conversation.id,
-        role: 'assistant',
+        role: 'ASSISTANT',
         content: assistantMessage,
         metadata
       }
     })
 
-    // Format response for frontend
-    let formattedMetadata = {}
-    
-    // Check if we found meetings/events
-    if (metadata.get_upcoming_events || metadata.search_contacts) {
-      // Format meeting data for the frontend
-      const events = metadata.get_upcoming_events || []
-      const meetings: any = {}
-      
-      events.forEach((event: any) => {
-        const date = new Date(event.startTime).toLocaleDateString('en-US', { 
-          weekday: 'long', 
-          day: 'numeric' 
-        })
-        
-        if (!meetings[date]) meetings[date] = []
-        
-        meetings[date].push({
-          id: event.id,
-          title: event.title,
-          time: `${new Date(event.startTime).toLocaleTimeString('en-US', { 
-            hour: 'numeric', 
-            minute: '2-digit' 
-          })} - ${new Date(event.endTime).toLocaleTimeString('en-US', { 
-            hour: 'numeric', 
-            minute: '2-digit' 
-          })}`,
-          attendees: event.attendees || [],
-          date
-        })
-      })
-      
-      formattedMetadata = { meetings }
-    }
-
     return NextResponse.json({
       response: assistantMessage,
-      metadata: formattedMetadata
+      metadata: {}
     })
 
   } catch (error) {

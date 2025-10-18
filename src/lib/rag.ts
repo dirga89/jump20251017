@@ -24,16 +24,19 @@ export class RAGService {
     try {
       // Generate embedding for the query
       const queryEmbedding = await this.generateEmbedding(query)
+      
+      // Format embedding as PostgreSQL vector array string
+      const embeddingString = `[${queryEmbedding.join(',')}]`
 
-      // Search using vector similarity
+      // Search using vector similarity with pgvector
       const results = await prisma.$queryRaw`
         SELECT 
           id, subject, sender, body, date,
-          embedding <-> ${JSON.stringify(queryEmbedding)} as distance
+          embedding <-> ${embeddingString}::vector as distance
         FROM "Email"
         WHERE "userId" = ${userId}
         AND embedding IS NOT NULL
-        ORDER BY embedding <-> ${JSON.stringify(queryEmbedding)}
+        ORDER BY embedding <-> ${embeddingString}::vector
         LIMIT ${limit}
       `
 
@@ -61,16 +64,19 @@ export class RAGService {
     try {
       // Generate embedding for the query
       const queryEmbedding = await this.generateEmbedding(query)
+      
+      // Format embedding as PostgreSQL vector array string
+      const embeddingString = `[${queryEmbedding.join(',')}]`
 
-      // Search using vector similarity
+      // Search using vector similarity with pgvector
       const results = await prisma.$queryRaw`
         SELECT 
           id, "firstName", "lastName", email, company, notes,
-          embedding <-> ${JSON.stringify(queryEmbedding)} as distance
+          embedding <-> ${embeddingString}::vector as distance
         FROM "Contact"
         WHERE "userId" = ${userId}
         AND embedding IS NOT NULL
-        ORDER BY embedding <-> ${JSON.stringify(queryEmbedding)}
+        ORDER BY embedding <-> ${embeddingString}::vector
         LIMIT ${limit}
       `
 
@@ -99,17 +105,20 @@ export class RAGService {
     try {
       // Generate embedding for the query
       const queryEmbedding = await this.generateEmbedding(query)
+      
+      // Format embedding as PostgreSQL vector array string
+      const embeddingString = `[${queryEmbedding.join(',')}]`
 
-      // Search using vector similarity
+      // Search using vector similarity with pgvector
       const results = await prisma.$queryRaw`
         SELECT 
           cn.id, cn.note, cn."createdAt", c."firstName", c."lastName", c.email,
-          cn.embedding <-> ${JSON.stringify(queryEmbedding)} as distance
+          cn.embedding <-> ${embeddingString}::vector as distance
         FROM "ContactNote" cn
         JOIN "Contact" c ON cn."contactId" = c.id
         WHERE cn."userId" = ${userId}
         AND cn.embedding IS NOT NULL
-        ORDER BY cn.embedding <-> ${JSON.stringify(queryEmbedding)}
+        ORDER BY cn.embedding <-> ${embeddingString}::vector
         LIMIT ${limit}
       `
 
@@ -134,23 +143,27 @@ export class RAGService {
 
   async updateEmailEmbeddings(userId: string) {
     try {
-      const emails = await prisma.email.findMany({
-        where: {
-          userId,
-          embedding: null
-        },
-        take: 50 // Process in batches
-      })
+      // Use raw query to avoid TypeScript issues with unsupported vector type
+      const emails: any[] = await prisma.$queryRaw`
+        SELECT id, subject, body 
+        FROM "Email"
+        WHERE "userId" = ${userId}
+        AND embedding IS NULL
+        LIMIT 50
+      `
 
       for (const email of emails) {
         try {
-          const text = `${email.subject} ${email.body}`.substring(0, 8000) // Limit text length
+          const text = `${email.subject || ''} ${email.body || ''}`.substring(0, 8000) // Limit text length
           const embedding = await this.generateEmbedding(text)
+          const embeddingString = `[${embedding.join(',')}]`
           
-          await prisma.email.update({
-            where: { id: email.id },
-            data: { embedding: JSON.stringify(embedding) }
-          })
+          // Use raw query to update embedding
+          await prisma.$executeRaw`
+            UPDATE "Email"
+            SET embedding = ${embeddingString}::vector
+            WHERE id = ${email.id}
+          `
         } catch (error) {
           console.error(`Error updating embedding for email ${email.id}:`, error)
         }
@@ -165,23 +178,27 @@ export class RAGService {
 
   async updateContactEmbeddings(userId: string) {
     try {
-      const contacts = await prisma.contact.findMany({
-        where: {
-          userId,
-          embedding: null
-        },
-        take: 50 // Process in batches
-      })
+      // Use raw query to avoid TypeScript issues with unsupported vector type
+      const contacts: any[] = await prisma.$queryRaw`
+        SELECT id, "firstName", "lastName", email, company, notes
+        FROM "Contact"
+        WHERE "userId" = ${userId}
+        AND embedding IS NULL
+        LIMIT 50
+      `
 
       for (const contact of contacts) {
         try {
-          const text = `${contact.firstName} ${contact.lastName} ${contact.email} ${contact.company} ${contact.notes}`.substring(0, 8000)
+          const text = `${contact.firstName || ''} ${contact.lastName || ''} ${contact.email || ''} ${contact.company || ''} ${contact.notes || ''}`.substring(0, 8000)
           const embedding = await this.generateEmbedding(text)
+          const embeddingString = `[${embedding.join(',')}]`
           
-          await prisma.contact.update({
-            where: { id: contact.id },
-            data: { embedding: JSON.stringify(embedding) }
-          })
+          // Use raw query to update embedding
+          await prisma.$executeRaw`
+            UPDATE "Contact"
+            SET embedding = ${embeddingString}::vector
+            WHERE id = ${contact.id}
+          `
         } catch (error) {
           console.error(`Error updating embedding for contact ${contact.id}:`, error)
         }
@@ -196,23 +213,27 @@ export class RAGService {
 
   async updateContactNoteEmbeddings(userId: string) {
     try {
-      const notes = await prisma.contactNote.findMany({
-        where: {
-          userId,
-          embedding: null
-        },
-        take: 50 // Process in batches
-      })
+      // Use raw query to avoid TypeScript issues with unsupported vector type
+      const notes: any[] = await prisma.$queryRaw`
+        SELECT id, note
+        FROM "ContactNote"
+        WHERE "userId" = ${userId}
+        AND embedding IS NULL
+        LIMIT 50
+      `
 
       for (const note of notes) {
         try {
-          const text = note.note.substring(0, 8000)
+          const text = (note.note || '').substring(0, 8000)
           const embedding = await this.generateEmbedding(text)
+          const embeddingString = `[${embedding.join(',')}]`
           
-          await prisma.contactNote.update({
-            where: { id: note.id },
-            data: { embedding: JSON.stringify(embedding) }
-          })
+          // Use raw query to update embedding
+          await prisma.$executeRaw`
+            UPDATE "ContactNote"
+            SET embedding = ${embeddingString}::vector
+            WHERE id = ${note.id}
+          `
         } catch (error) {
           console.error(`Error updating embedding for note ${note.id}:`, error)
         }
@@ -234,10 +255,10 @@ export class RAGService {
       ])
 
       return {
-        emails,
-        contacts,
-        notes,
-        summary: this.formatContext(emails, contacts, notes)
+        emails: emails as any[],
+        contacts: contacts as any[],
+        notes: notes as any[],
+        summary: this.formatContext(emails as any[], contacts as any[], notes as any[])
       }
     } catch (error) {
       console.error('Get context error:', error)
