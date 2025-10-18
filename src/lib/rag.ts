@@ -71,7 +71,7 @@ export class RAGService {
       // Search using vector similarity with pgvector
       const results = await prisma.$queryRaw`
         SELECT 
-          id, "firstName", "lastName", email, company, notes,
+          id, "hubspotId", "firstName", "lastName", email, company, notes,
           embedding <-> ${embeddingString}::vector as distance
         FROM "Contact"
         WHERE "userId" = ${userId}

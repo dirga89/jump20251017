@@ -9,6 +9,7 @@ import Link from 'next/link'
 
 interface UserData {
   hubspotConnected: boolean
+  hubspotTokenExpired?: boolean
   emailCount: number
   contactCount: number
   eventCount: number
@@ -41,7 +42,14 @@ export default function Dashboard() {
   }
 
   const handleHubSpotConnect = () => {
-    const hubspotAuthUrl = `https://app.hubspot.com/oauth/authorize?client_id=${process.env.NEXT_PUBLIC_HUBSPOT_CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.NEXT_PUBLIC_HUBSPOT_REDIRECT_URI || '')}&scope=contacts%20crm.objects.contacts.read%20crm.objects.contacts.write`
+    const scopes = [
+      'crm.objects.contacts.read',
+      'crm.objects.contacts.write',
+      'crm.schemas.contacts.read',
+      'crm.schemas.contacts.write'
+    ].join('%20')
+    
+    const hubspotAuthUrl = `https://app.hubspot.com/oauth/authorize?client_id=${process.env.NEXT_PUBLIC_HUBSPOT_CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.NEXT_PUBLIC_HUBSPOT_REDIRECT_URI || '')}&scope=${scopes}`
     window.location.href = hubspotAuthUrl
   }
 
@@ -114,6 +122,7 @@ export default function Dashboard() {
                   variant="outline"
                   onClick={() => handleSync('emails')}
                   disabled={isSyncing}
+                  className="text-blue-600 border-blue-600 bg-blue-50 hover:bg-blue-100"
                 >
                   <Mail className="w-4 h-4 mr-2" />
                   Sync Emails
@@ -123,6 +132,7 @@ export default function Dashboard() {
                   variant="outline"
                   onClick={() => handleSync('calendar')}
                   disabled={isSyncing}
+                  className="text-blue-600 border-blue-600 bg-blue-50 hover:bg-blue-100"
                 >
                   <Calendar className="w-4 h-4 mr-2" />
                   Sync Calendar
@@ -143,21 +153,28 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <CardDescription className="mb-4">
-                CRM contacts and notes
+                {userData?.hubspotTokenExpired 
+                  ? "Token expired - reconnect required" 
+                  : "CRM contacts and notes"}
               </CardDescription>
-              {userData?.hubspotConnected ? (
+              {userData?.hubspotConnected && !userData?.hubspotTokenExpired ? (
                 <Button 
                   size="sm" 
                   variant="outline"
                   onClick={() => handleSync('contacts')}
                   disabled={isSyncing}
+                  className="text-green-600 border-green-600 bg-green-50 hover:bg-green-100"
                 >
                   <Users className="w-4 h-4 mr-2" />
                   Sync Contacts
                 </Button>
               ) : (
-                <Button size="sm" onClick={handleHubSpotConnect}>
-                  Connect HubSpot
+                <Button 
+                  size="sm" 
+                  onClick={handleHubSpotConnect}
+                  className="bg-green-600 text-white hover:bg-green-700"
+                >
+                  {userData?.hubspotTokenExpired ? 'Reconnect HubSpot' : 'Connect HubSpot'}
                 </Button>
               )}
             </CardContent>
@@ -173,7 +190,7 @@ export default function Dashboard() {
               <CardDescription className="mb-4">
                 Ready to help with your data
               </CardDescription>
-              <Button asChild size="sm">
+              <Button asChild size="sm" className="bg-blue-600 text-white hover:bg-blue-700">
                 <Link href="/">
                   Start Chatting
                 </Link>

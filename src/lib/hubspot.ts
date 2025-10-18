@@ -23,7 +23,7 @@ export class HubSpotService {
         'lifecyclestage'
       ])
 
-      const contacts = response.results || []
+      const contacts = (response as any).results || []
       
       for (const contact of contacts) {
         await this.syncContact(userId, contact)
@@ -66,15 +66,15 @@ export class HubSpotService {
 
   async syncContactNotes(userId: string, contactId: string) {
     try {
-      // Get notes for this contact
-      const response = await this.client.crm.objects.notes.getAll(undefined, undefined, [
+      // Get notes for this contact - using basicApi.getPage instead of getAll
+      const response = await this.client.crm.objects.notes.basicApi.getPage(undefined, undefined, [
         'hs_note_body',
         'hs_createdate'
       ])
 
-      const notes = response.results?.filter(note => 
-        note.associations?.contacts?.results?.some(assoc => assoc.id === contactId)
-      ) || []
+      const notes = (response.results as any[] || []).filter((note: any) => 
+        note.associations?.contacts?.results?.some((assoc: any) => assoc.id === contactId)
+      )
 
       for (const note of notes) {
         await prisma.contactNote.upsert({
@@ -110,33 +110,28 @@ export class HubSpotService {
     try {
       const response = await this.client.crm.contacts.basicApi.create({
         properties: {
-          email: contactData.email,
-          firstname: contactData.firstName,
-          lastname: contactData.lastName,
-          phone: contactData.phone,
-          company: contactData.company,
-          jobtitle: contactData.jobTitle,
+          email: contactData.email || '',
+          firstname: contactData.firstName || '',
+          lastname: contactData.lastName || '',
+          phone: contactData.phone || '',
+          company: contactData.company || '',
+          jobtitle: contactData.jobTitle || '',
           lifecyclestage: 'lead'
         }
       })
 
-      // Add note if provided
-      if (contactData.notes) {
-        await this.client.crm.objects.notes.basicApi.create({
-          properties: {
-            hs_note_body: contactData.notes
-          },
-          associations: [
-            {
-              to: { id: response.id },
-              types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 214 }]
-            }
-          ]
-        })
-      }
-
-      // Sync the new contact to our database
+      // Sync the new contact to our database first
       await this.syncContact(userId, response)
+
+      // Add note if provided - do this AFTER syncing the contact
+      if (contactData.notes && response.id) {
+        try {
+          await this.addContactNote(response.id, contactData.notes)
+        } catch (noteError) {
+          console.error('Error adding note to new contact:', noteError)
+          // Don't fail the whole operation if note creation fails
+        }
+      }
 
       return { success: true, contactId: response.id }
     } catch (error) {
@@ -147,14 +142,21 @@ export class HubSpotService {
 
   async addContactNote(contactId: string, note: string) {
     try {
+      // Create note with association to contact
       const response = await this.client.crm.objects.notes.basicApi.create({
         properties: {
-          hs_note_body: note
+          hs_note_body: note,
+          hs_timestamp: new Date().toISOString()
         },
         associations: [
           {
             to: { id: contactId },
-            types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 214 }]
+            types: [
+              {
+                associationCategory: 'HUBSPOT_DEFINED' as any,
+                associationTypeId: 202
+              }
+            ]
           }
         ]
       })

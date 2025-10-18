@@ -59,7 +59,7 @@ export class ToolService {
       },
       {
         name: 'search_contacts',
-        description: 'Search through HubSpot contacts for specific information',
+        description: 'Search through HubSpot contacts. Returns contacts with their hubspotId field (use this ID for add_contact_note)',
         parameters: {
           type: 'object',
           properties: {
@@ -301,6 +301,34 @@ export class ToolService {
           },
           required: ['taskId', 'status']
         }
+      },
+      {
+        name: 'save_ongoing_instruction',
+        description: 'Save a persistent instruction that the AI should always follow (e.g., "always create contacts from new emails")',
+        parameters: {
+          type: 'object',
+          properties: {
+            instruction: {
+              type: 'string',
+              description: 'The instruction to remember'
+            },
+            triggerType: {
+              type: 'string',
+              enum: ['EMAIL_RECEIVED', 'CALENDAR_EVENT_CREATED', 'CONTACT_CREATED', 'ALWAYS'],
+              description: 'When this instruction should be applied'
+            }
+          },
+          required: ['instruction', 'triggerType']
+        }
+      },
+      {
+        name: 'list_ongoing_instructions',
+        description: 'Get all active ongoing instructions',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
       }
     ]
   }
@@ -385,6 +413,22 @@ export class ToolService {
               error: toolCall.arguments.error,
               completedAt: toolCall.arguments.status === 'COMPLETED' ? new Date() : undefined
             }
+          })
+
+        case 'save_ongoing_instruction':
+          return await prisma.ongoingInstruction.create({
+            data: {
+              userId,
+              instruction: toolCall.arguments.instruction,
+              triggerType: toolCall.arguments.triggerType,
+              isActive: true
+            }
+          })
+
+        case 'list_ongoing_instructions':
+          return await prisma.ongoingInstruction.findMany({
+            where: { userId, isActive: true },
+            orderBy: { createdAt: 'desc' }
           })
 
         default:

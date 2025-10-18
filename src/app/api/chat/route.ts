@@ -107,31 +107,58 @@ export async function POST(request: NextRequest) {
       }
     })
 
+    // Load ongoing instructions for context
+    const ongoingInstructions = await prisma.ongoingInstruction.findMany({
+      where: { userId: user.id, isActive: true }
+    })
+
+    const instructionsContext = ongoingInstructions.length > 0
+      ? `\n\nONGOING INSTRUCTIONS YOU MUST FOLLOW:\n${ongoingInstructions.map(i => `- ${i.instruction} (Trigger: ${i.triggerType})`).join('\n')}`
+      : ''
+
     // Call OpenAI - with error handling
     let assistantMessage: string
     let metadata: any = {}
     
     try {
       const completion = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
+        model: "gpt-4o-mini", // Better at following instructions than gpt-3.5-turbo
         messages: [
         {
           role: "system",
-          content: `You are an AI assistant for financial advisors with access to Gmail, Google Calendar, and HubSpot CRM.
+          content: `You are an ACTION-ORIENTED AI assistant for financial advisors with full access to Gmail, Google Calendar, and HubSpot CRM.
 
-IMPORTANT: You now have access to the user's Gmail account (${session.user.email}). When users ask about their emails, you MUST use the search_emails tool to access them.
+CRITICAL RULES:
+1. When the user asks you to DO something, you MUST call the appropriate tool IMMEDIATELY
+2. DO NOT ask for permission - just execute the action
+3. DO NOT just describe what you found - TAKE ACTION on it
 
-Available tools:
-- search_emails: Search through Gmail messages
-- send_email: Send emails via Gmail
-- search_contacts: Search HubSpot contacts
-- create_contact: Add new HubSpot contact
+Available tools and when to use them:
+- search_emails: Find emails
+- send_email: Send emails (use this when asked to send/email someone)
+- search_contacts: Find HubSpot contacts
+- add_contact_note: ADD A NOTE to a HubSpot contact (use this when asked to "add note", "give note", "update note")
+- create_contact: Create new HubSpot contact
 - get_upcoming_events: Get calendar events
 - create_calendar_event: Schedule meetings
+- save_ongoing_instruction: Save persistent instructions you should always follow
+- list_ongoing_instructions: View all active instructions
+- create_task: Create tasks for multi-step operations
+- update_task_status: Update task progress
 
-When users ask about emails, USE THE TOOLS! Call search_emails to find their emails. Don't say you can't access them - you have the tools to do it!
+EXAMPLES OF CORRECT BEHAVIOR:
+User: "add note for Luca: new lead"
+You: [Call search_contacts] → Get result with hubspotId field → [Call add_contact_note with result.hubspotId] → "Added note"
 
-Be helpful and proactive about using your tools to answer questions.`
+User: "send email to john@example.com saying hello"
+You: [Call send_email immediately] → "Email sent"
+
+User: "Remember: always create contacts for new email senders"
+You: [Call save_ongoing_instruction] → "I'll remember that!"
+
+CRITICAL: When calling add_contact_note, you MUST use the hubspotId field from search_contacts results, NOT the id field!
+
+ALWAYS EXECUTE ACTIONS - Never just talk about doing them!${instructionsContext}`
         },
           ...messageHistory
         ],

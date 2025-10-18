@@ -26,8 +26,14 @@ export async function GET(request: NextRequest) {
       prisma.calendarEvent.count({ where: { userId: user.id } })
     ])
 
+    // Check if HubSpot token is expired
+    const isHubSpotExpired = user.hubspotExpiresAt 
+      ? new Date(user.hubspotExpiresAt) < new Date()
+      : false
+
     return NextResponse.json({
-      hubspotConnected: user.hubspotConnected,
+      hubspotConnected: user.hubspotConnected && !isHubSpotExpired,
+      hubspotTokenExpired: isHubSpotExpired,
       emailCount,
       contactCount,
       eventCount

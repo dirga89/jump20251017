@@ -24,6 +24,7 @@ export default function TestChatInterface() {
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [isSyncingContacts, setIsSyncingContacts] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -131,6 +132,41 @@ export default function TestChatInterface() {
     }
   }
 
+  const handleSyncContacts = async () => {
+    setIsSyncingContacts(true)
+    try {
+      const response = await fetch('/api/sync/contacts', {
+        method: 'POST'
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to sync contacts')
+      }
+
+      const data = await response.json()
+      
+      const syncMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: `✅ Successfully synced ${data.count} contacts from HubSpot! You can now ask me questions about your contacts.`,
+        timestamp: new Date()
+      }
+      
+      setMessages(prev => [...prev, syncMessage])
+    } catch (error) {
+      console.error('Sync error:', error)
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: "❌ Failed to sync contacts. Please make sure you've connected HubSpot in the dashboard.",
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, errorMessage])
+    } finally {
+      setIsSyncingContacts(false)
+    }
+  }
+
   // Show loading state
   if (status === 'loading') {
     return (
@@ -167,17 +203,24 @@ export default function TestChatInterface() {
             <div className="border-b border-gray-200 px-6 py-4">
               <div className="flex items-center justify-between">
                 <h1 className="text-xl font-bold text-gray-900">Ask Anything</h1>
-                <div className="flex items-center space-x-4">
-                  <button
-                    onClick={handleSyncEmails}
-                    disabled={isSyncing}
-                    className="text-sm px-3 py-1 bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded transition-colors"
-                  >
-                    {isSyncing ? 'Syncing...' : '🔄 Sync Emails'}
-                  </button>
-                  <div className="text-sm text-gray-500">
-                    Welcome, {session.user?.name || session.user?.email}
-                  </div>
+              <div className="flex items-center space-x-4">
+                <button
+                  onClick={handleSyncEmails}
+                  disabled={isSyncing}
+                  className="text-sm px-3 py-1 bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded transition-colors"
+                >
+                  {isSyncing ? 'Syncing...' : '🔄 Sync Emails'}
+                </button>
+                <button
+                  onClick={handleSyncContacts}
+                  disabled={isSyncingContacts}
+                  className="text-sm px-3 py-1 bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded transition-colors"
+                >
+                  {isSyncingContacts ? 'Syncing...' : '👥 Sync Contacts'}
+                </button>
+                <div className="text-sm text-gray-500">
+                  Welcome, {session.user?.name || session.user?.email}
+                </div>
                   <button
                     onClick={() => {
                       if (confirm('Are you sure you want to sign out?')) {
