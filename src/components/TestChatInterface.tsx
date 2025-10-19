@@ -65,7 +65,7 @@ export default function TestChatInterface() {
     {
       id: '1',
       role: 'assistant',
-      content: "Hello! I'm your AI assistant for financial advisors. I can help you with Gmail, Calendar, and HubSpot integration. What would you like to know?",
+      content: "Hello! I'm your AI assistant for financial advisors. I can help you with Gmail, Calendar, and HubSpot integration.\n\n💡 **Tip:** Start your message with \"Remember:\" to create ongoing instructions I'll follow automatically.\n\nExamples:\n• \"Remember: When someone emails me that is not in HubSpot, create a contact with a note about the email\"\n• \"Remember: Always CC me on meeting confirmations\"\n\nWhat would you like to do?",
       timestamp: new Date()
     }
   ])
@@ -375,7 +375,7 @@ export default function TestChatInterface() {
                 >
                   📊 Dashboard
                 </button>
-                <button
+                {/* <button
                   onClick={handleSyncEmails}
                   disabled={isSyncing}
                   className="text-sm px-3 py-1 bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded transition-colors"
@@ -388,7 +388,7 @@ export default function TestChatInterface() {
                   className="text-sm px-3 py-1 bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded transition-colors"
                 >
                   {isSyncingContacts ? 'Syncing...' : '👥 Sync Contacts'}
-                </button>
+                </button> */}
                 <button
                   onClick={handlePollEmails}
                   disabled={isPolling}
@@ -500,7 +500,7 @@ export default function TestChatInterface() {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Ask anything about your emails, contacts, or calendar..."
+              placeholder='Type your message... (Use "Remember:" for ongoing instructions)'
               className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 placeholder-gray-500"
               disabled={isLoading}
             />
