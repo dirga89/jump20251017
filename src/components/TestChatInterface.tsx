@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useSession, signIn } from 'next-auth/react'
+import NotificationBell from './NotificationBell'
 
 interface Message {
   id: string
@@ -9,6 +10,53 @@ interface Message {
   content: string
   timestamp: Date
   metadata?: any
+  calendarEvents?: CalendarEvent[]
+}
+
+interface CalendarEvent {
+  id: string
+  title: string
+  description?: string
+  startTime: string
+  endTime: string
+  location?: string
+  attendees?: string[]
+}
+
+// Helper function to parse calendar events from assistant response
+const parseCalendarEvents = (content: string): CalendarEvent[] | null => {
+  // Check if the response contains meeting/calendar event information
+  const meetingPattern = /\d+\.\s\*\*(.*?)\*\*/g
+  const matches = Array.from(content.matchAll(meetingPattern))
+  
+  if (matches.length === 0) return null
+  
+  const events: CalendarEvent[] = []
+  const sections = content.split(/\d+\.\s\*\*/)
+  
+  sections.forEach((section, index) => {
+    if (index === 0) return // Skip intro text
+    
+    const titleMatch = section.match(/^(.*?)\*\*/)
+    const descMatch = section.match(/- \*\*Description:\*\* (.*?)(?:\n|$)/)
+    const timeMatch = section.match(/- \*\*Time:\*\* (.*?)(?:\n|$)/)
+    const locationMatch = section.match(/- \*\*Location:\*\* (.*?)(?:\n|$)/)
+    const attendeesMatch = section.match(/- \*\*Attendees:\*\* (.*?)(?:\n|$)/)
+    
+    if (titleMatch && timeMatch) {
+      events.push({
+        id: `event-${index}`,
+        title: titleMatch[1].trim(),
+        description: descMatch ? descMatch[1].trim() : undefined,
+        startTime: timeMatch[1].split(' - ')[0]?.trim() || '',
+        endTime: timeMatch[1].split(' - ')[1]?.trim() || '',
+        location: locationMatch ? locationMatch[1].trim() : undefined,
+        attendees: attendeesMatch ? [attendeesMatch[1].trim()] : undefined
+      })
+    }
+  })
+  
+  return events.length > 0 ? events : null
 }
 
 export default function TestChatInterface() {
@@ -26,7 +74,9 @@ export default function TestChatInterface() {
   const [isSyncing, setIsSyncing] = useState(false)
   const [isSyncingContacts, setIsSyncingContacts] = useState(false)
   const [isPolling, setIsPolling] = useState(false)
+  const [isListening, setIsListening] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const recognitionRef = useRef<any>(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -35,6 +85,59 @@ export default function TestChatInterface() {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  // Initialize speech recognition
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+      
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition()
+        recognition.continuous = false
+        recognition.interimResults = false
+        recognition.lang = 'en-US'
+
+        recognition.onstart = () => {
+          setIsListening(true)
+        }
+
+        recognition.onresult = (event: any) => {
+          const transcript = event.results[0][0].transcript
+          setInputValue(transcript)
+        }
+
+        recognition.onerror = (event: any) => {
+          console.error('Speech recognition error:', event.error)
+          setIsListening(false)
+        }
+
+        recognition.onend = () => {
+          setIsListening(false)
+        }
+
+        recognitionRef.current = recognition
+      }
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
+      }
+    }
+  }, [])
+
+  const toggleVoiceInput = () => {
+    if (!recognitionRef.current) {
+      alert('Speech recognition is not supported in your browser. Please use Chrome, Edge, or Safari.')
+      return
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop()
+    } else {
+      recognitionRef.current.start()
+    }
+  }
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return
@@ -68,12 +171,16 @@ export default function TestChatInterface() {
 
       const data = await response.json()
       
+      // Try to parse calendar events from the response
+      const calendarEvents = parseCalendarEvents(data.response)
+      
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: data.response,
         timestamp: new Date(),
-        metadata: data.metadata
+        metadata: data.metadata,
+        calendarEvents: calendarEvents || undefined
       }
 
       setMessages(prev => [...prev, assistantMessage])
@@ -261,6 +368,13 @@ export default function TestChatInterface() {
               <div className="flex items-center justify-between">
                 <h1 className="text-xl font-bold text-gray-900">Ask Anything</h1>
               <div className="flex items-center space-x-4">
+                <NotificationBell />
+                <button
+                  onClick={() => window.location.href = '/dashboard'}
+                  className="text-sm px-3 py-1 bg-gray-600 text-white hover:bg-gray-700 rounded transition-colors"
+                >
+                  📊 Dashboard
+                </button>
                 <button
                   onClick={handleSyncEmails}
                   disabled={isSyncing}
@@ -314,7 +428,51 @@ export default function TestChatInterface() {
                     : 'bg-gray-100 text-gray-900'
                 }`}
               >
-                <p className="whitespace-pre-wrap">{message.content}</p>
+                {/* Show calendar events as cards if available */}
+                {message.calendarEvents && message.calendarEvents.length > 0 ? (
+                  <div className="space-y-4">
+                    <p className="text-sm mb-4 font-medium">📅 Your meetings for today:</p>
+                    <div className="grid gap-3">
+                      {message.calendarEvents.map((event) => (
+                        <div
+                          key={event.id}
+                          className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow"
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <h3 className="font-semibold text-gray-900 text-base flex-1">
+                              {event.title}
+                            </h3>
+                            {event.location && (
+                              <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
+                                📍 {event.location}
+                              </span>
+                            )}
+                          </div>
+                          
+                          {event.description && (
+                            <p className="text-sm text-gray-600 mb-3">
+                              {event.description}
+                            </p>
+                          )}
+                          
+                          <div className="flex items-center text-sm text-gray-700 mb-2">
+                            <span className="font-medium mr-2">🕐</span>
+                            <span>{event.startTime} - {event.endTime}</span>
+                          </div>
+                          
+                          {event.attendees && event.attendees.length > 0 && (
+                            <div className="flex items-center text-sm text-gray-600">
+                              <span className="font-medium mr-2">👥</span>
+                              <span className="truncate">{event.attendees.join(', ')}</span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="whitespace-pre-wrap">{message.content}</p>
+                )}
               </div>
             </div>
           ))}
@@ -346,6 +504,29 @@ export default function TestChatInterface() {
               className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 placeholder-gray-500"
               disabled={isLoading}
             />
+            
+            {/* Microphone Button */}
+            <button 
+              onClick={toggleVoiceInput}
+              disabled={isLoading}
+              className={`p-2 rounded-lg transition-all ${
+                isListening 
+                  ? 'bg-red-500 text-white animate-pulse' 
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
+              title={isListening ? 'Listening... Click to stop' : 'Click to speak'}
+            >
+              {isListening ? (
+                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
+                </svg>
+              )}
+            </button>
+            
             <button 
               onClick={handleSendMessage}
               disabled={!inputValue.trim() || isLoading}

@@ -28,15 +28,22 @@ export class ToolService {
   constructor(
     gmailAccessToken: string,
     hubspotAccessToken: string,
-    calendarAccessToken: string
+    calendarAccessToken: string,
+    gmailRefreshToken?: string,
+    calendarRefreshToken?: string
   ) {
-    this.gmail = new GmailService(gmailAccessToken)
+    this.gmail = new GmailService(gmailAccessToken, gmailRefreshToken)
     this.hubspot = new HubSpotService(hubspotAccessToken)
-    this.calendar = new CalendarService(calendarAccessToken)
+    this.calendar = new CalendarService(calendarAccessToken, calendarRefreshToken)
     this.rag = new RAGService()
   }
 
   getAvailableTools(): Tool[] {
+    // Get current date for tool descriptions
+    const now = new Date()
+    const todayStr = now.toISOString().split('T')[0]
+    const year = now.getFullYear()
+    
     return [
       {
         name: 'search_emails',
@@ -254,7 +261,7 @@ export class ToolService {
       },
       {
         name: 'get_upcoming_events',
-        description: 'Get upcoming calendar events',
+        description: 'Get upcoming calendar events (future only)',
         parameters: {
           type: 'object',
           properties: {
@@ -265,6 +272,29 @@ export class ToolService {
             }
           },
           required: []
+        }
+      },
+      {
+        name: 'search_calendar_events',
+        description: `Search calendar events by date range. CRITICAL: We are in year ${year}. Current date is ${todayStr}. Use this for queries like "today's meetings", "meetings this week", "past meetings", or any date-specific queries. ALWAYS use year ${year}, NOT 2023 or 2024!`,
+        parameters: {
+          type: 'object',
+          properties: {
+            startDate: {
+              type: 'string',
+              description: `Start date in ISO format. MUST use year ${year}! For "today" use "${todayStr}T00:00:00Z". Example: "${todayStr}T00:00:00Z"`
+            },
+            endDate: {
+              type: 'string',
+              description: `End date in ISO format. MUST use year ${year}! For "today" use "${todayStr}T23:59:59Z". Example: "${todayStr}T23:59:59Z"`
+            },
+            maxResults: {
+              type: 'number',
+              description: 'Maximum number of events to return',
+              default: 50
+            }
+          },
+          required: ['startDate', 'endDate']
         }
       },
       {
@@ -412,6 +442,19 @@ export class ToolService {
           )
 
         case 'create_contact':
+          // Check if trying to create contact for the user themselves
+          const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { email: true }
+          })
+          
+          if (user && toolCall.arguments.email === user.email) {
+            return {
+              error: 'Cannot create contact for yourself',
+              message: 'This is your own email address. Contacts should only be created for other people.'
+            }
+          }
+          
           return await this.hubspot.createContact(userId, toolCall.arguments)
 
         case 'add_contact_note':
@@ -439,6 +482,31 @@ export class ToolService {
 
         case 'get_upcoming_events':
           return await this.calendar.getUpcomingEvents(userId, toolCall.arguments.maxResults || 10)
+
+        case 'search_calendar_events':
+          const eventStartDate = new Date(toolCall.arguments.startDate)
+          const eventEndDate = new Date(toolCall.arguments.endDate)
+          
+          return await prisma.calendarEvent.findMany({
+            where: {
+              userId,
+              startTime: {
+                gte: eventStartDate,
+                lte: eventEndDate
+              }
+            },
+            orderBy: { startTime: 'asc' },
+            take: toolCall.arguments.maxResults || 50,
+            select: {
+              id: true,
+              title: true,
+              description: true,
+              startTime: true,
+              endTime: true,
+              location: true,
+              attendees: true
+            }
+          })
 
         case 'create_task':
           return await prisma.task.create({

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { CheckCircle, XCircle, RefreshCw, Mail, Calendar, Users } from 'lucide-react'
 import Link from 'next/link'
+import NotificationBell from '@/components/NotificationBell'
 
 interface UserData {
   hubspotConnected: boolean
@@ -117,8 +118,13 @@ export default function Dashboard() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600 mt-2">Welcome back, {session?.user?.name}</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+              <p className="text-gray-600 mt-2">Welcome back, {session?.user?.name}</p>
+            </div>
+            <NotificationBell />
+          </div>
           
           {/* Instructions Banner */}
           <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">

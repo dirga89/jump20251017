@@ -62,6 +62,7 @@ model User {
   calendarEvents CalendarEvent[]
   tasks        Task[]
   conversations Conversation[]
+  notifications Notification[]
 }
 
 model VerificationToken {
@@ -258,6 +259,44 @@ enum MessageRole {
   USER
   ASSISTANT
   SYSTEM
+}
+
+// Activity Notifications
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type        NotificationType
+  title       String
+  message     String   @db.Text
+  isRead      Boolean  @default(false)
+  severity    NotificationSeverity @default(INFO)
+  
+  metadata    Json?    // Additional data (contact info, task info, etc.)
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([userId, isRead, createdAt])
+}
+
+enum NotificationType {
+  NEW_CONTACT_CREATED
+  NEW_EMAIL_PROCESSED
+  TASK_COMPLETED
+  TASK_FAILED
+  CALENDAR_EVENT_CREATED
+  HUBSPOT_TOKEN_EXPIRED
+  GOOGLE_TOKEN_EXPIRED
+  PROACTIVE_ACTION
+  ERROR
+}
+
+enum NotificationSeverity {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
 }
 
 // Webhook tracking
