@@ -5,6 +5,7 @@ import { OpenAI } from 'openai'
 import { ToolService } from '@/lib/tools'
 import { RAGService } from '@/lib/rag'
 import { prisma } from '@/lib/prisma'
+import '@/lib/startup' // Initialize background services
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -136,7 +137,8 @@ CRITICAL RULES:
 5. DO NOT mention unrelated search results or contacts that don't match what the user asked about
 
 Available tools and when to use them:
-- search_emails: Find emails
+- search_emails: Search emails by content/keywords
+- get_recent_emails: Get recent emails by date (use this for "today's emails", "emails from last week", "recent emails")
 - send_email: Send emails (use this when asked to send/email someone)
 - search_contacts: Find HubSpot contacts
 - add_contact_note: ADD A NOTE to a HubSpot contact (use this when asked to "add note", "give note", "update note")
@@ -149,6 +151,12 @@ Available tools and when to use them:
 - update_task_status: Update task progress
 
 EXAMPLES OF CORRECT BEHAVIOR:
+User: "show me today's emails"
+You: [Call get_recent_emails with daysBack: 0] → List emails from today only
+
+User: "emails from last week"
+You: [Call get_recent_emails with daysBack: 7] → List emails from the last 7 days
+
 User: "add note for Luca: new lead"
 You: [Call search_contacts] → Get result with hubspotId field → [Call add_contact_note with result.hubspotId] → "Added note for Luca"
 

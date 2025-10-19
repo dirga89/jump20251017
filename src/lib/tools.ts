@@ -58,6 +58,26 @@ export class ToolService {
         }
       },
       {
+        name: 'get_recent_emails',
+        description: 'Get the most recent emails, optionally filtered by date. Use this for "today\'s emails", "recent emails", "emails from last week", etc.',
+        parameters: {
+          type: 'object',
+          properties: {
+            daysBack: {
+              type: 'number',
+              description: 'Number of days to look back (0 = today only, 1 = yesterday and today, 7 = last week)',
+              default: 1
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum number of emails to return',
+              default: 10
+            }
+          },
+          required: []
+        }
+      },
+      {
         name: 'search_contacts',
         description: 'Search through HubSpot contacts. Returns contacts with their hubspotId field (use this ID for add_contact_note)',
         parameters: {
@@ -314,7 +334,7 @@ export class ToolService {
             },
             triggerType: {
               type: 'string',
-              enum: ['EMAIL_RECEIVED', 'CALENDAR_EVENT_CREATED', 'CONTACT_CREATED', 'ALWAYS'],
+              enum: ['NEW_EMAIL', 'NEW_CONTACT', 'NEW_CALENDAR_EVENT', 'EMAIL_RESPONSE', 'CALENDAR_RESPONSE', 'HUBSPOT_UPDATE'],
               description: 'When this instruction should be applied'
             }
           },
@@ -348,6 +368,34 @@ export class ToolService {
           }
           // Fallback to Gmail API direct search
           return await this.gmail.searchEmails(userId, toolCall.arguments.query, toolCall.arguments.limit || 10)
+
+        case 'get_recent_emails':
+          const daysBack = toolCall.arguments.daysBack || 1
+          const startDate = new Date()
+          startDate.setDate(startDate.getDate() - daysBack)
+          startDate.setHours(0, 0, 0, 0)
+          
+          const emails = await prisma.email.findMany({
+            where: {
+              userId,
+              date: {
+                gte: startDate
+              }
+            },
+            orderBy: {
+              date: 'desc'
+            },
+            take: toolCall.arguments.limit || 10,
+            select: {
+              id: true,
+              subject: true,
+              sender: true,
+              body: true,
+              date: true
+            }
+          })
+          
+          return emails
 
         case 'search_contacts':
           return await this.rag.searchContacts(userId, toolCall.arguments.query, toolCall.arguments.limit || 5)

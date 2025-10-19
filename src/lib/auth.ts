@@ -4,6 +4,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter"
 import { prisma } from "./prisma"
 
 export const authOptions: NextAuthOptions = {
+  adapter: PrismaAdapter(prisma) as any, // Add Prisma adapter to save accounts to database
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,

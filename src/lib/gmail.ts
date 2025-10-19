@@ -186,4 +186,72 @@ export class GmailService {
       })
     }
   }
+
+  async getNewEmailsSince(sinceDate: Date) {
+    try {
+      // Convert date to timestamp for Gmail query
+      const timestamp = Math.floor(sinceDate.getTime() / 1000)
+      
+      const response = await this.gmail.users.messages.list({
+        userId: 'me',
+        maxResults: 20,
+        q: `after:${timestamp}`
+      })
+
+      const messages = response.data.messages || []
+      const emails = []
+
+      for (const message of messages) {
+        const email = await this.getEmailDetails(message.id)
+        if (email) {
+          emails.push(email)
+        }
+      }
+
+      return emails
+    } catch (error) {
+      console.error('Get new emails error:', error)
+      return []
+    }
+  }
+
+  private async getEmailDetails(messageId: string) {
+    try {
+      const response = await this.gmail.users.messages.get({
+        userId: 'me',
+        id: messageId,
+        format: 'full'
+      })
+
+      const headers = response.data.payload.headers
+      const subject = headers.find((h: any) => h.name === 'Subject')?.value || 'No Subject'
+      const from = headers.find((h: any) => h.name === 'From')?.value || 'Unknown'
+      const dateStr = headers.find((h: any) => h.name === 'Date')?.value
+      const date = dateStr ? new Date(dateStr) : new Date()
+
+      let body = ''
+      if (response.data.payload.body?.data) {
+        body = Buffer.from(response.data.payload.body.data, 'base64').toString('utf-8')
+      } else if (response.data.payload.parts) {
+        const textPart = response.data.payload.parts.find((part: any) => 
+          part.mimeType === 'text/plain' || part.mimeType === 'text/html'
+        )
+        if (textPart?.body?.data) {
+          body = Buffer.from(textPart.body.data, 'base64').toString('utf-8')
+        }
+      }
+
+      return {
+        id: messageId,
+        subject,
+        from,
+        date,
+        body,
+        snippet: response.data.snippet || ''
+      }
+    } catch (error) {
+      console.error('Get email details error:', error)
+      return null
+    }
+  }
 }

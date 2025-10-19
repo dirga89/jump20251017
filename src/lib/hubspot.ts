@@ -10,6 +10,7 @@ export class HubSpotService {
 
   async syncContacts(userId: string) {
     try {
+      console.log('📞 Fetching contacts from HubSpot API...')
       // Get all contacts from HubSpot
       const response = await this.client.crm.contacts.getAll(undefined, undefined, [
         'firstname',
@@ -23,15 +24,22 @@ export class HubSpotService {
         'lifecyclestage'
       ])
 
-      const contacts = (response as any).results || []
+      console.log('📊 HubSpot API response type:', typeof response)
+      console.log('📊 HubSpot API response keys:', Object.keys(response || {}))
+      console.log('📊 Is array?', Array.isArray(response))
+      
+      // HubSpot getAll() returns an array directly, not an object with results
+      const contacts = Array.isArray(response) ? response : ((response as any).results || [])
+      console.log(`📋 Found ${contacts.length} contacts in HubSpot`)
       
       for (const contact of contacts) {
+        console.log(`💾 Syncing contact: ${contact.properties?.email || contact.id}`)
         await this.syncContact(userId, contact)
       }
 
       return { success: true, count: contacts.length }
     } catch (error) {
-      console.error('HubSpot contacts sync error:', error)
+      console.error('❌ HubSpot contacts sync error:', error)
       throw error
     }
   }

@@ -26,13 +26,17 @@ export async function POST(request: NextRequest) {
     const ragService = new RAGService()
 
     // Sync contacts
+    console.log('🔄 Starting HubSpot contact sync...')
     const syncResult = await hubspotService.syncContacts(user.id)
+    console.log(`✅ Synced ${syncResult.count} contacts from HubSpot`)
     
     // Update embeddings for new contacts and notes
+    console.log('🔄 Updating contact embeddings...')
     await Promise.all([
       ragService.updateContactEmbeddings(user.id),
       ragService.updateContactNoteEmbeddings(user.id)
     ])
+    console.log('✅ Embeddings updated')
 
     return NextResponse.json({
       success: true,

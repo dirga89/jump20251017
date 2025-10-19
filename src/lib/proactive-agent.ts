@@ -19,20 +19,24 @@ export class ProactiveAgent {
     try {
       // Get user with tokens
       const user = await prisma.user.findUnique({
-        where: { id: userId }
+        where: { id: userId },
+        include: {
+          accounts: true
+        }
       })
 
       if (!user) return
+
+      // Get Google access token from accounts
+      const googleAccount = user.accounts.find(acc => acc.provider === 'google')
+      if (!googleAccount?.access_token) return
 
       // Get ongoing instructions
       const instructions = await prisma.ongoingInstruction.findMany({
         where: { 
           userId, 
           isActive: true,
-          OR: [
-            { triggerType: 'EMAIL_RECEIVED' },
-            { triggerType: 'ALWAYS' }
-          ]
+          triggerType: 'NEW_EMAIL'
         }
       })
 
@@ -40,9 +44,9 @@ export class ProactiveAgent {
 
       // Initialize tool service
       const toolService = new ToolService(
-        user.googleAccessToken || '',
+        googleAccount.access_token,
         user.hubspotAccessToken || '',
-        user.googleAccessToken || ''
+        googleAccount.access_token
       )
 
       const tools = toolService.getAvailableTools()
@@ -66,7 +70,16 @@ BODY: ${emailData.body.substring(0, 500)}
 Your ongoing instructions:
 ${instructionsText}
 
-Based on these instructions, what actions should you take? If no action is needed, respond with "NO_ACTION". Otherwise, use the available tools to execute the appropriate actions.`
+EXECUTE THESE STEPS:
+1. Use search_contacts to check if the sender (${emailData.from}) exists in HubSpot
+2. If NO contact found (search returns empty array or no match), use create_contact to create a new contact with:
+   - email: sender's email address
+   - firstName: extracted from sender name if available
+   - lastName: extracted from sender name if available  
+   - notes: "Email received: [subject]"
+3. If contact exists, you can optionally add a note using add_contact_note
+
+You MUST execute the tools to complete these actions. Do not just acknowledge - take action now.`
 
       // Call AI to decide what to do
       const completion = await openai.chat.completions.create({
@@ -86,37 +99,79 @@ Based on these instructions, what actions should you take? If no action is neede
         max_tokens: 1000,
       })
 
-      // Execute any tool calls
-      if (completion.choices[0]?.message?.tool_calls) {
-        const toolCalls = completion.choices[0].message.tool_calls
-        
-        console.log(`🤖 Proactive agent processing email from ${emailData.from}`)
-        console.log(`🔧 Executing ${toolCalls.length} tool(s)`)
+      // Execute tool calls in a loop until no more tools are needed
+      let currentCompletion = completion
+      let conversationHistory: any[] = [
+        {
+          role: "system",
+          content: `You are a proactive AI assistant that monitors emails and takes action based on ongoing instructions. You have access to all tools and should execute actions automatically when appropriate.`
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ]
 
+      console.log(`🤖 Proactive agent processing email from ${emailData.from}`)
+
+      // Allow up to 5 rounds of tool calling
+      for (let round = 0; round < 5; round++) {
+        if (!currentCompletion.choices[0]?.message?.tool_calls) {
+          break
+        }
+
+        const toolCalls = currentCompletion.choices[0].message.tool_calls
+        console.log(`🔧 Round ${round + 1}: Executing ${toolCalls.length} tool(s)`)
+
+        // Add assistant's response to history
+        conversationHistory.push(currentCompletion.choices[0].message)
+
+        // Execute all tool calls and collect results
+        const toolResults: any[] = []
         for (const toolCall of toolCalls) {
           if (toolCall.type === 'function' && toolCall.function) {
             console.log(`🔨 ${toolCall.function.name}:`, toolCall.function.arguments)
             
             try {
-              await toolService.executeTool(userId, {
+              const result = await toolService.executeTool(userId, {
                 name: toolCall.function.name,
                 arguments: JSON.parse(toolCall.function.arguments)
               })
+              
+              console.log(`✅ Tool result:`, JSON.stringify(result).substring(0, 200))
+              
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: 'tool',
+                name: toolCall.function.name,
+                content: JSON.stringify(result)
+              })
             } catch (error) {
-              console.error(`❌ Proactive agent error:`, error)
+              console.error(`❌ Tool error:`, error)
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: 'tool',
+                name: toolCall.function.name,
+                content: JSON.stringify({ error: String(error) })
+              })
             }
           }
         }
 
-        // Log the proactive action
-        await prisma.message.create({
-          data: {
-            conversationId: 'proactive-agent',
-            role: 'ASSISTANT',
-            content: `Proactively processed email from ${emailData.from}: ${completion.choices[0]?.message?.content || 'Executed actions'}`
-          }
+        // Add tool results to history
+        conversationHistory.push(...toolResults)
+
+        // Get next AI response with tool results
+        currentCompletion = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: conversationHistory,
+          tools: toolDefinitions,
+          tool_choice: "auto",
+          max_tokens: 1000,
         })
       }
+
+      console.log(`✅ Proactively processed email from ${emailData.from}`)
     } catch (error) {
       console.error('Proactive agent error:', error)
     }
@@ -133,28 +188,31 @@ Based on these instructions, what actions should you take? If no action is neede
   }) {
     try {
       const user = await prisma.user.findUnique({
-        where: { id: userId }
+        where: { id: userId },
+        include: {
+          accounts: true
+        }
       })
 
       if (!user) return
+
+      const googleAccount = user.accounts.find(acc => acc.provider === 'google')
+      if (!googleAccount?.access_token) return
 
       const instructions = await prisma.ongoingInstruction.findMany({
         where: { 
           userId, 
           isActive: true,
-          OR: [
-            { triggerType: 'CALENDAR_EVENT_CREATED' },
-            { triggerType: 'ALWAYS' }
-          ]
+          triggerType: 'NEW_CALENDAR_EVENT'
         }
       })
 
       if (instructions.length === 0) return
 
       const toolService = new ToolService(
-        user.googleAccessToken || '',
+        googleAccount.access_token,
         user.hubspotAccessToken || '',
-        user.googleAccessToken || ''
+        googleAccount.access_token
       )
 
       const tools = toolService.getAvailableTools()
@@ -231,29 +289,32 @@ Based on these instructions, what actions should you take? Use the available too
   }) {
     try {
       const user = await prisma.user.findUnique({
-        where: { id: userId }
+        where: { id: userId },
+        include: {
+          accounts: true
+        }
       })
 
       if (!user) return
+
+      const googleAccount = user.accounts.find(acc => acc.provider === 'google')
+      if (!googleAccount?.access_token) return
 
       const instructions = await prisma.ongoingInstruction.findMany({
         where: { 
           userId, 
           isActive: true,
-          OR: [
-            { triggerType: 'CONTACT_CREATED' },
-            { triggerType: 'ALWAYS' }
-          ]
+          triggerType: 'NEW_CONTACT'
         }
       })
 
       if (instructions.length === 0) return
 
       const toolService = new ToolService(
-        user.googleAccessToken || '',
+        googleAccount.access_token,
         user.hubspotAccessToken || '',
-        user.googleAccessToken || ''
-      })
+        googleAccount.access_token
+      )
 
       const tools = toolService.getAvailableTools()
       const toolDefinitions = tools.map(tool => ({

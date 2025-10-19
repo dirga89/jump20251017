@@ -11,24 +11,42 @@ export async function POST(request: NextRequest) {
         ongoingInstructions: {
           some: {
             isActive: true,
-            OR: [
-              { triggerType: 'EMAIL_RECEIVED' },
-              { triggerType: 'ALWAYS' }
-            ]
+            triggerType: 'NEW_EMAIL'
+          }
+        }
+      },
+      include: {
+        accounts: {
+          where: {
+            provider: 'google'
           }
         }
       }
     })
+
+    console.log(`📊 Users found:`, usersWithInstructions.map(u => ({
+      email: u.email,
+      accountsCount: u.accounts.length
+    })))
 
     console.log(`🔍 Polling emails for ${usersWithInstructions.length} users...`)
 
     const proactiveAgent = new ProactiveAgent()
 
     for (const user of usersWithInstructions) {
-      if (!user.googleAccessToken) continue
+      console.log(`👤 Processing user: ${user.email}`)
+      
+      // Get Google access token from accounts
+      const googleAccount = user.accounts.find(acc => acc.provider === 'google')
+      if (!googleAccount?.access_token) {
+        console.log(`❌ No Google account found for ${user.email}`)
+        continue
+      }
+
+      console.log(`✅ Found Google account for ${user.email}`)
 
       try {
-        const gmail = new GmailService(user.googleAccessToken, user.googleRefreshToken || undefined)
+        const gmail = new GmailService(googleAccount.access_token, googleAccount.refresh_token || undefined)
 
         // Get the last processed email timestamp
         const lastEmail = await prisma.email.findFirst({
@@ -36,72 +54,55 @@ export async function POST(request: NextRequest) {
           orderBy: { date: 'desc' }
         })
 
-        // Search for new emails since last check
-        const response = await gmail.gmail.users.messages.list({
-          userId: 'me',
-          maxResults: 10,
-          q: lastEmail ? `after:${Math.floor(lastEmail.date.getTime() / 1000)}` : 'is:unread'
-        })
-
-        const newMessages = response.data.messages || []
+        const sinceDate = lastEmail?.date || new Date(Date.now() - 24 * 60 * 60 * 1000)
         
-        console.log(`📧 Found ${newMessages.length} new emails for ${user.email}`)
+        console.log(`🔍 Checking emails since: ${sinceDate.toISOString()} for ${user.email}`)
+        
+        // Use the getNewEmailsSince method
+        const newEmails = await gmail.getNewEmailsSince(sinceDate)
+        
+        console.log(`📧 Gmail returned ${newEmails.length} emails for ${user.email}`)
 
-        for (const message of newMessages) {
-          // Get full message details
-          const fullMessage = await gmail.gmail.users.messages.get({
-            userId: 'me',
-            id: message.id!,
-            format: 'full'
+        for (const email of newEmails) {
+          // Check if already exists
+          const existing = await prisma.email.findFirst({
+            where: { userId: user.id, gmailId: email.id }
           })
-
-          const headers = fullMessage.data.payload?.headers || []
-          const getHeader = (name: string) => 
-            headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value
-
-          const from = getHeader('From') || ''
-          const subject = getHeader('Subject') || ''
           
-          // Extract body
-          let body = ''
-          const extractBody = (part: any): void => {
-            if (part.body?.data) {
-              body += Buffer.from(part.body.data, 'base64').toString()
-            }
-            if (part.parts) {
-              part.parts.forEach(extractBody)
-            }
+          if (existing) {
+            console.log(`⏭️  Skipping existing email: ${email.subject}`)
+            continue
           }
-          if (fullMessage.data.payload) {
-            extractBody(fullMessage.data.payload)
-          }
-
+          
+          console.log(`📥 NEW EMAIL: "${email.subject}" from ${email.from}`)
           // Store the email
           await prisma.email.create({
             data: {
               userId: user.id,
-              gmailId: message.id!,
-              threadId: fullMessage.data.threadId || '',
-              subject,
-              sender: from,
+              gmailId: email.id,
+              threadId: '',
+              subject: email.subject,
+              sender: email.from,
               recipient: user.email || '',
-              body: body.substring(0, 5000), // Limit body length
-              date: new Date(getHeader('Date') || Date.now()),
-              labels: fullMessage.data.labelIds || [],
-              isRead: !(fullMessage.data.labelIds || []).includes('UNREAD')
+              body: email.body.substring(0, 5000),
+              date: email.date,
+              labels: [],
+              isRead: false
             }
           })
 
           // Trigger proactive agent
+          console.log(`🤖 Processing with proactive agent...`)
           await proactiveAgent.processNewEmail(user.id, {
-            from,
-            subject,
-            body,
-            messageId: message.id!
+            from: email.from,
+            subject: email.subject,
+            body: email.body,
+            messageId: email.id
           })
+          console.log(`✅ Processed: ${email.subject}`)
         }
       } catch (error) {
-        console.error(`Error polling emails for user ${user.email}:`, error)
+        console.error(`❌ Error polling emails for user ${user.email}:`, error)
       }
     }
 
