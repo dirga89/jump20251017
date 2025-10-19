@@ -42,6 +42,9 @@ next-env.d.ts
 # prisma
 prisma/.env
 
+# HubSpot
+hubspot.config.yml
+
 # IDE
 .vscode/
 .idea/
