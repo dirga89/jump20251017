@@ -58,175 +58,17 @@ export class ProactiveAgent {
 
       if (instructions.length === 0) return
 
-      // Get pending tasks related to this sender
-      const pendingTasks = await prisma.task.findMany({
-        where: {
-          userId,
-          status: { in: ['PENDING', 'WAITING_FOR_RESPONSE'] },
-          OR: [
-            { title: { contains: emailData.from.split('<')[0].trim(), mode: 'insensitive' } },
-            { description: { contains: emailData.from, mode: 'insensitive' } }
-          ]
-        },
-        take: 3
-      })
-
-      // Initialize tool service
-      const toolService = new ToolService(
-        googleAccount.access_token,
-        user.hubspotAccessToken || '',
-        googleAccount.access_token,
-        googleAccount.refresh_token || undefined,
-        googleAccount.refresh_token || undefined
-      )
-
-      const tools = toolService.getAvailableTools()
-      const toolDefinitions = tools.map(tool => ({
-        type: 'function' as const,
-        function: {
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.parameters
-        }
-      }))
-
-      // Build context for AI
-      const instructionsText = instructions.map(i => `- ${i.instruction}`).join('\n')
-      const tasksText = pendingTasks.length > 0 
-        ? `\n\nPENDING TASKS RELATED TO THIS SENDER:\n${pendingTasks.map(t => `- Task ID: ${t.id}, Title: "${t.title}", Status: ${t.status}, Description: ${t.description}`).join('\n')}`
-        : ''
-      
-      const prompt = `A new email was received:
-FROM: ${emailData.from}
-SUBJECT: ${emailData.subject}
-BODY: ${emailData.body.substring(0, 1000)}
-
-Your ongoing instructions:
-${instructionsText}${tasksText}
-
-INTELLIGENT EMAIL PROCESSING:
-
-**IMPORTANT: This email is from ${senderEmail}. The user's email is ${userEmail}.**
-${senderEmail === userEmail ? '⚠️ This is a SELF-SENT email - DO NOT create any contacts or take actions.' : ''}
-
-1. **Check if this is a REPLY to a scheduling request:**
-   - Subject starts with "Re:" or mentions scheduling/appointment/meeting
-   - Body contains time selection or acceptance
-
-2. **If it's a scheduling reply with a selected time:**
-   a) Use search_contacts to get the contact (to retrieve the hubspotId)
-   b) Extract the chosen time from the email body
-   c) Use create_calendar_event to schedule the meeting at that time
-   d) Use send_email to confirm the appointment
-   e) Use add_contact_note with the hubspotId (NOT the database id) to log the scheduled meeting
-   f) Use update_task_status to mark any related task as COMPLETED
-
-3. **If sender is NOT in HubSpot (and is NOT the user themselves):**
-   a) Use search_contacts to check if sender exists
-   b) If not found AND sender email ≠ ${userEmail}, use create_contact with notes about the email
-   c) NEVER create contacts for the user themselves (${userEmail})
-
-4. **Otherwise:**
-   - Add a note to the contact using add_contact_note
-
-CRITICAL: If the email contains a time selection or appointment acceptance, you MUST create the calendar event!
-
-Execute the appropriate tools based on the email content.`
-
-      // Call AI to decide what to do
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `You are a proactive AI assistant that monitors emails and takes action based on ongoing instructions. You have access to all tools and should execute actions automatically when appropriate.`
-          },
-          {
-            role: "user",
-            content: prompt
-          }
-        ],
-        tools: toolDefinitions,
-        tool_choice: "auto",
-        max_tokens: 1000,
-      })
-
-      // Execute tool calls in a loop until no more tools are needed
-      let currentCompletion = completion
-      let conversationHistory: any[] = [
-        {
-          role: "system",
-          content: `You are a proactive AI assistant that monitors emails and takes action based on ongoing instructions. You have access to all tools and should execute actions automatically when appropriate.`
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ]
+      // Use the flexible instruction executor instead of hardcoded logic
+      const { InstructionExecutor } = await import('./instruction-executor')
+      const executor = new InstructionExecutor()
 
       console.log(`🤖 Proactive agent processing email from ${emailData.from}`)
 
-      // Allow up to 5 rounds of tool calling
-      for (let round = 0; round < 5; round++) {
-        if (!currentCompletion.choices[0]?.message?.tool_calls) {
-          break
-        }
-
-        const toolCalls = currentCompletion.choices[0].message.tool_calls
-        console.log(`🔧 Round ${round + 1}: Executing ${toolCalls.length} tool(s)`)
-
-        // Add assistant's response to history
-        conversationHistory.push(currentCompletion.choices[0].message)
-
-        // Execute all tool calls and collect results
-        const toolResults: any[] = []
-        for (const toolCall of toolCalls) {
-          if (toolCall.type === 'function' && toolCall.function) {
-            console.log(`🔨 ${toolCall.function.name}:`, toolCall.function.arguments)
-            
-            try {
-              const result = await toolService.executeTool(userId, {
-                name: toolCall.function.name,
-                arguments: JSON.parse(toolCall.function.arguments)
-              })
-              
-              console.log(`✅ Tool result:`, JSON.stringify(result).substring(0, 200))
-              
-              // Create notifications for important actions
-              await this.createNotificationForAction(userId, toolCall.function.name, JSON.parse(toolCall.function.arguments), result, emailData)
-              
-              toolResults.push({
-                tool_call_id: toolCall.id,
-                role: 'tool',
-                name: toolCall.function.name,
-                content: JSON.stringify(result)
-              })
-            } catch (error) {
-              console.error(`❌ Tool error:`, error)
-              
-              // Create error notification
-              await this.createErrorNotification(userId, toolCall.function.name, String(error), emailData)
-              
-              toolResults.push({
-                tool_call_id: toolCall.id,
-                role: 'tool',
-                name: toolCall.function.name,
-                content: JSON.stringify({ error: String(error) })
-              })
-            }
-          }
-        }
-
-        // Add tool results to history
-        conversationHistory.push(...toolResults)
-
-        // Get next AI response with tool results
-        currentCompletion = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: conversationHistory,
-          tools: toolDefinitions,
-          tool_choice: "auto",
-          max_tokens: 1000,
+      // Execute each instruction using the AI-driven executor
+      for (const instruction of instructions) {
+        await executor.executeInstruction(userId, instruction, {
+          triggerType: 'NEW_EMAIL',
+          eventData: emailData
         })
       }
 
@@ -268,69 +110,18 @@ Execute the appropriate tools based on the email content.`
 
       if (instructions.length === 0) return
 
-      const toolService = new ToolService(
-        googleAccount.access_token,
-        user.hubspotAccessToken || '',
-        googleAccount.access_token
-      )
+      // Use the flexible instruction executor
+      const { InstructionExecutor } = await import('./instruction-executor')
+      const executor = new InstructionExecutor()
 
-      const tools = toolService.getAvailableTools()
-      const toolDefinitions = tools.map(tool => ({
-        type: 'function' as const,
-        function: {
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.parameters
-        }
-      }))
+      console.log(`🤖 Proactive agent processing calendar event: ${eventData.title}`)
 
-      const instructionsText = instructions.map(i => `- ${i.instruction}`).join('\n')
-      
-      const prompt = `A new calendar event was created:
-TITLE: ${eventData.title}
-START: ${eventData.startTime}
-END: ${eventData.endTime}
-ATTENDEES: ${eventData.attendees.join(', ')}
-
-Your ongoing instructions:
-${instructionsText}
-
-Based on these instructions, what actions should you take? Use the available tools to execute the appropriate actions.`
-
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `You are a proactive AI assistant that monitors calendar events and takes action based on ongoing instructions.`
-          },
-          {
-            role: "user",
-            content: prompt
-          }
-        ],
-        tools: toolDefinitions,
-        tool_choice: "auto",
-        max_tokens: 1000,
-      })
-
-      if (completion.choices[0]?.message?.tool_calls) {
-        const toolCalls = completion.choices[0].message.tool_calls
-        
-        console.log(`🤖 Proactive agent processing calendar event: ${eventData.title}`)
-
-        for (const toolCall of toolCalls) {
-          if (toolCall.type === 'function' && toolCall.function) {
-            try {
-              await toolService.executeTool(userId, {
-                name: toolCall.function.name,
-                arguments: JSON.parse(toolCall.function.arguments)
-              })
-            } catch (error) {
-              console.error(`❌ Proactive agent error:`, error)
-            }
-          }
-        }
+      // Execute each instruction using the AI-driven executor
+      for (const instruction of instructions) {
+        await executor.executeInstruction(userId, instruction, {
+          triggerType: 'NEW_CALENDAR_EVENT',
+          eventData
+        })
       }
     } catch (error) {
       console.error('Proactive agent error:', error)
