@@ -3,12 +3,26 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
+function getBaseUrl(request: NextRequest): string {
+  // Use NEXTAUTH_URL if available (production)
+  if (process.env.NEXTAUTH_URL) {
+    return process.env.NEXTAUTH_URL
+  }
+  
+  // Fallback to constructing from request headers
+  const protocol = request.headers.get('x-forwarded-proto') || 'http'
+  const host = request.headers.get('host') || 'localhost:3000'
+  return `${protocol}://${host}`
+}
+
 export async function GET(request: NextRequest) {
+  const baseUrl = getBaseUrl(request)
+  
   try {
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
-      return NextResponse.redirect(new URL('/auth/signin', request.url))
+      return NextResponse.redirect(new URL('/auth/signin', baseUrl))
     }
 
     const { searchParams } = new URL(request.url)
@@ -16,7 +30,7 @@ export async function GET(request: NextRequest) {
     const state = searchParams.get('state')
 
     if (!code) {
-      return NextResponse.redirect(new URL('/dashboard?error=no_code', request.url))
+      return NextResponse.redirect(new URL('/dashboard?error=no_code', baseUrl))
     }
 
     // Exchange code for access token
@@ -38,7 +52,7 @@ export async function GET(request: NextRequest) {
 
     if (!tokenResponse.ok) {
       console.error('HubSpot token error:', tokenData)
-      return NextResponse.redirect(new URL('/dashboard?error=token_failed', request.url))
+      return NextResponse.redirect(new URL('/dashboard?error=token_failed', baseUrl))
     }
 
     // Get user info
@@ -56,10 +70,10 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return NextResponse.redirect(new URL('/dashboard?hubspot=connected', request.url))
+    return NextResponse.redirect(new URL('/dashboard?hubspot=connected', baseUrl))
 
   } catch (error) {
     console.error('HubSpot callback error:', error)
-    return NextResponse.redirect(new URL('/dashboard?error=callback_failed', request.url))
+    return NextResponse.redirect(new URL('/dashboard?error=callback_failed', baseUrl))
   }
 }
