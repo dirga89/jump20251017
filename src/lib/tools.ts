@@ -379,6 +379,71 @@ export class ToolService {
           properties: {},
           required: []
         }
+      },
+      {
+        name: 'create_autonomous_agent',
+        description: 'Create an autonomous AI agent that works continuously to perform tasks on a schedule. This agent will create its own commands and execute them automatically based on instructions.',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Name of the autonomous agent'
+            },
+            goal: {
+              type: 'string',
+              description: 'Primary goal or objective of the agent'
+            },
+            instructions: {
+              type: 'string',
+              description: 'Detailed instructions for what the agent should do'
+            },
+            triggerType: {
+              type: 'string',
+              enum: ['NEW_EMAIL', 'NEW_CONTACT', 'NEW_CALENDAR_EVENT', 'SCHEDULED', 'CONTINUOUS'],
+              description: 'When the agent should activate'
+            },
+            schedule: {
+              type: 'string',
+              description: 'Schedule pattern (e.g., "every 15 minutes", "daily at 9am", "weekly on monday")',
+              default: 'continuous'
+            },
+            canCreateTasks: {
+              type: 'boolean',
+              description: 'Whether the agent can create its own tasks',
+              default: true
+            },
+            canModifyInstructions: {
+              type: 'boolean',
+              description: 'Whether the agent can modify its own instructions',
+              default: false
+            }
+          },
+          required: ['name', 'goal', 'instructions', 'triggerType']
+        }
+      },
+      {
+        name: 'generate_ongoing_instruction',
+        description: 'Analyze user patterns and automatically generate an ongoing instruction to make the AI more proactive. Use this when you notice patterns in user behavior that could be automated.',
+        parameters: {
+          type: 'object',
+          properties: {
+            pattern: {
+              type: 'string',
+              description: 'Describe the pattern you observed'
+            },
+            suggestedInstruction: {
+              type: 'string',
+              description: 'The instruction that should be followed'
+            },
+            triggerType: {
+              type: 'string',
+              enum: ['NEW_EMAIL', 'NEW_CONTACT', 'NEW_CALENDAR_EVENT', 'EMAIL_RESPONSE', 'CALENDAR_RESPONSE', 'HUBSPOT_UPDATE'],
+              description: 'When this instruction should be applied'
+            }
+          },
+          required: ['pattern', 'suggestedInstruction', 'triggerType']
+        }
       }
     ]
   }
@@ -546,6 +611,45 @@ export class ToolService {
             where: { userId, isActive: true },
             orderBy: { createdAt: 'desc' }
           })
+
+        case 'create_autonomous_agent':
+          // Create an ongoing instruction with special metadata for autonomous agents
+          const agentInstruction = await prisma.ongoingInstruction.create({
+            data: {
+              userId,
+              instruction: `AUTONOMOUS AGENT: ${toolCall.arguments.name}
+GOAL: ${toolCall.arguments.goal}
+INSTRUCTIONS: ${toolCall.arguments.instructions}
+SCHEDULE: ${toolCall.arguments.schedule || 'continuous'}
+CAN CREATE TASKS: ${toolCall.arguments.canCreateTasks !== false}
+CAN MODIFY INSTRUCTIONS: ${toolCall.arguments.canModifyInstructions || false}`,
+              triggerType: toolCall.arguments.triggerType,
+              isActive: true
+            }
+          })
+          
+          return {
+            success: true,
+            agentId: agentInstruction.id,
+            message: `Created autonomous agent "${toolCall.arguments.name}" that will continuously work on: ${toolCall.arguments.goal}`
+          }
+
+        case 'generate_ongoing_instruction':
+          // Analyze pattern and create a new ongoing instruction
+          const generatedInstruction = await prisma.ongoingInstruction.create({
+            data: {
+              userId,
+              instruction: `AUTO-GENERATED: ${toolCall.arguments.suggestedInstruction}`,
+              triggerType: toolCall.arguments.triggerType,
+              isActive: true
+            }
+          })
+          
+          return {
+            success: true,
+            instructionId: generatedInstruction.id,
+            message: `Generated new ongoing instruction based on pattern: ${toolCall.arguments.pattern}`
+          }
 
         default:
           throw new Error(`Unknown tool: ${toolCall.name}`)
