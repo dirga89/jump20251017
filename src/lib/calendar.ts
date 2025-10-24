@@ -55,6 +55,13 @@ export class CalendarService {
       
       const attendees = googleEvent.attendees?.map((a: any) => a.email) || []
 
+      // Check if this is a new event or update
+      const existingEvent = await prisma.calendarEvent.findUnique({
+        where: { googleId: googleEvent.id }
+      })
+
+      const isNewEvent = !existingEvent
+
       await prisma.calendarEvent.upsert({
         where: { googleId: googleEvent.id },
         update: {
@@ -79,8 +86,34 @@ export class CalendarService {
         }
       })
 
+      // If this is a new event, trigger proactive instruction execution
+      if (isNewEvent) {
+        console.log(`🆕 New calendar event detected: ${googleEvent.summary}`)
+        await this.triggerProactiveInstructions(userId, {
+          title: googleEvent.summary || 'No Title',
+          startTime,
+          endTime,
+          attendees
+        })
+      }
+
     } catch (error) {
       console.error(`Error syncing event ${googleEvent.id}:`, error)
+    }
+  }
+
+  private async triggerProactiveInstructions(userId: string, eventData: any) {
+    try {
+      // Dynamically import to avoid circular dependency
+      const { ProactiveAgent } = await import('./proactive-agent')
+      const agent = new ProactiveAgent()
+
+      console.log(`🔔 Triggering proactive instructions for new calendar event`)
+      
+      // Process the new calendar event with proactive agent
+      await agent.processNewCalendarEvent(userId, eventData)
+    } catch (error) {
+      console.error('Error triggering proactive instructions:', error)
     }
   }
 

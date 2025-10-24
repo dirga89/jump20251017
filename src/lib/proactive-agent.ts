@@ -109,11 +109,19 @@ INTELLIGENT EMAIL PROCESSING:
 **IMPORTANT: This email is from ${senderEmail}. The user's email is ${userEmail}.**
 ${senderEmail === userEmail ? '⚠️ This is a SELF-SENT email - DO NOT create any contacts or take actions.' : ''}
 
-1. **Check if this is a REPLY to a scheduling request:**
+CRITICAL: You MUST respond to questions and requests from clients. Use your tools to gather information and send helpful responses.
+
+1. **If the email contains a QUESTION or REQUEST for information:**
+   - Look up relevant information using search_emails, search_contacts, search_calendar_events
+   - Use the gathered information to craft a helpful response
+   - Send the response using send_email
+   - Add a note to the contact using add_contact_note
+
+2. **Check if this is a REPLY to a scheduling request:**
    - Subject starts with "Re:" or mentions scheduling/appointment/meeting
    - Body contains time selection or acceptance
 
-2. **If it's a scheduling reply with a selected time:**
+3. **If it's a scheduling reply with a selected time:**
    a) Use search_contacts to get the contact (to retrieve the hubspotId)
    b) Extract the chosen time from the email body
    c) Use create_calendar_event to schedule the meeting at that time
@@ -121,15 +129,23 @@ ${senderEmail === userEmail ? '⚠️ This is a SELF-SENT email - DO NOT create 
    e) Use add_contact_note with the hubspotId (NOT the database id) to log the scheduled meeting
    f) Use update_task_status to mark any related task as COMPLETED
 
-3. **If sender is NOT in HubSpot (and is NOT the user themselves):**
+4. **If sender is NOT in HubSpot (and is NOT the user themselves):**
    a) Use search_contacts to check if sender exists
    b) If not found AND sender email ≠ ${userEmail}, use create_contact with notes about the email
    c) NEVER create contacts for the user themselves (${userEmail})
 
-4. **Otherwise:**
+5. **If the email asks about upcoming meetings:**
+   - Use search_calendar_events to find upcoming meetings
+   - Look up the sender's name in contacts
+   - Send them the meeting details
+
+6. **Otherwise:**
    - Add a note to the contact using add_contact_note
 
-CRITICAL: If the email contains a time selection or appointment acceptance, you MUST create the calendar event!
+CRITICAL: 
+- Always respond to questions and requests! Don't leave clients hanging.
+- If the email contains a time selection or appointment acceptance, you MUST create the calendar event!
+- Use available tools to gather information before responding.
 
 Execute the appropriate tools based on the email content.`
 
