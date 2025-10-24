@@ -252,7 +252,7 @@ Don't ask for permission - just execute. Use multiple tools if needed to complet
         case 'send_email':
           await NotificationService.create(
             userId,
-            'EMAIL_SENT',
+            'PROACTIVE_ACTION',
             'Email Sent',
             `Sent email to ${args.to}`,
             'SUCCESS',

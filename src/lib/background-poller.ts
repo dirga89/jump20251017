@@ -197,8 +197,13 @@ export class BackgroundPoller {
           console.error(`❌ Error processing email ${email.subject}:`, error)
         }
       }
-    } catch (error) {
-      console.error(`Error polling emails for ${user.email}:`, error)
+    } catch (error: any) {
+      // Handle token expiration gracefully
+      if (error?.message?.includes('invalid_grant') || error?.code === 400) {
+        console.warn(`⚠️  Google token expired for ${user.email}. Please re-authenticate.`)
+      } else {
+        console.error(`Error polling emails for ${user.email}:`, error)
+      }
     }
   }
 
@@ -242,8 +247,13 @@ export class BackgroundPoller {
       // Note: The proactive processing happens inside syncCalendarEvents through triggerProactiveInstructions
       // So we don't need to manually process here - it's automatic!
       
-    } catch (error) {
-      console.error(`Error polling calendar events for ${user.email}:`, error)
+    } catch (error: any) {
+      // Handle token expiration gracefully
+      if (error?.message?.includes('invalid_grant') || error?.code === 400) {
+        console.warn(`⚠️  Google token expired for ${user.email}. Please re-authenticate.`)
+      } else {
+        console.error(`Error polling calendar events for ${user.email}:`, error)
+      }
     }
   }
 }
