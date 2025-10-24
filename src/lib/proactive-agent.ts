@@ -58,11 +58,11 @@ export class ProactiveAgent {
 
       if (instructions.length === 0) return
 
-      // Use the flexible instruction executor instead of hardcoded logic
+      console.log(`🤖 Proactive agent processing email from ${emailData.from}`)
+
+      // Use the flexible instruction executor
       const { InstructionExecutor } = await import('./instruction-executor')
       const executor = new InstructionExecutor()
-
-      console.log(`🤖 Proactive agent processing email from ${emailData.from}`)
 
       // Execute each instruction using the AI-driven executor
       for (const instruction of instructions) {

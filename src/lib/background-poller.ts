@@ -1,9 +1,10 @@
 import { ProactiveAgent } from './proactive-agent'
 import { prisma } from './prisma'
 import { GmailService } from './gmail'
+import { CalendarService } from './calendar'
 
 /**
- * Background polling service that automatically checks for new emails
+ * Background polling service that automatically checks for new emails and calendar events
  * and processes them based on ongoing instructions
  */
 export class BackgroundPoller {
@@ -88,6 +89,7 @@ export class BackgroundPoller {
 
       for (const user of users) {
         await this.pollUserEmails(user)
+        await this.pollUserCalendarEvents(user)
       }
     } catch (error) {
       console.error('Background polling error:', error)
@@ -197,6 +199,51 @@ export class BackgroundPoller {
       }
     } catch (error) {
       console.error(`Error polling emails for ${user.email}:`, error)
+    }
+  }
+
+  /**
+   * Poll calendar events for a specific user
+   */
+  private async pollUserCalendarEvents(user: any) {
+    try {
+      // Check if user has NEW_CALENDAR_EVENT instructions
+      const hasCalendarInstructions = user.ongoingInstructions.some(
+        (i: any) => i.triggerType === 'NEW_CALENDAR_EVENT'
+      )
+
+      if (!hasCalendarInstructions) {
+        return
+      }
+
+      // Get Google access token
+      const googleAccount = user.accounts.find((acc: any) => acc.provider === 'google')
+      if (!googleAccount?.access_token) {
+        return
+      }
+
+      // Get the last processed calendar event timestamp
+      const lastProcessed = await prisma.calendarEvent.findFirst({
+        where: { userId: user.id },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true }
+      })
+
+      const sinceDate = lastProcessed?.createdAt || new Date(Date.now() - 24 * 60 * 60 * 1000)
+
+      console.log(`📅 Checking calendar events since: ${sinceDate.toISOString()} for ${user.email}`)
+
+      // Fetch new calendar events
+      const calendarService = new CalendarService(googleAccount.access_token, googleAccount.refresh_token)
+      const newEvents = await calendarService.syncCalendarEvents(user.id, 7) // Check last 7 days
+
+      console.log(`📆 Synced ${newEvents.count} calendar events for ${user.email}`)
+
+      // Note: The proactive processing happens inside syncCalendarEvents through triggerProactiveInstructions
+      // So we don't need to manually process here - it's automatic!
+      
+    } catch (error) {
+      console.error(`Error polling calendar events for ${user.email}:`, error)
     }
   }
 }
