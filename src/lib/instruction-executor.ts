@@ -29,6 +29,9 @@ export class InstructionExecutor {
 
       if (!user) return
 
+      // Get user's name for email signatures
+      const userName = user.name || 'User'
+
       // Get Google access token
       const googleAccount = user.accounts.find(acc => acc.provider === 'google')
       if (!googleAccount?.access_token) return
@@ -81,11 +84,18 @@ COMPANY: ${contactData.company}`
 
 YOUR INSTRUCTION: ${instruction.instruction}
 
+**IMPORTANT CONTEXT:**
+- Your name is ${userName} (use this in email signatures, NEVER use "[Your Name]")
+- When answering questions about meetings, you MUST first search the calendar using search_calendar_events tool
+- Always look up actual information before responding - don't make up or guess
+
 Based on this instruction and the context above, what actions should you take? 
 Interpret the instruction naturally and use the available tools to execute it.
 Be autonomous and proactive - execute actions automatically without asking for permission.
 
-Remember:
+CRITICAL RULES:
+- ALWAYS search calendar events before answering meeting questions
+- ALWAYS use ${userName} as your signature, NEVER "[Your Name]"
 - If the instruction mentions "send email" or "email" - use send_email tool
 - If it mentions "create contact" or "add contact" - use create_contact tool
 - If it mentions "schedule" or "meeting" - use create_calendar_event tool
