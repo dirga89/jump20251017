@@ -62,13 +62,6 @@ export class CalendarService {
 
       const isNewEvent = !existingEvent
 
-      // Check if this is a new event or update
-      const existingEvent = await prisma.calendarEvent.findUnique({
-        where: { googleId: googleEvent.id }
-      })
-
-      const isNewEvent = !existingEvent
-
       await prisma.calendarEvent.upsert({
         where: { googleId: googleEvent.id },
         update: {
