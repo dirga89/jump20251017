@@ -55,6 +55,13 @@ export class CalendarService {
       
       const attendees = googleEvent.attendees?.map((a: any) => a.email) || []
 
+      // Check if this is a new event or update
+      const existingEvent = await prisma.calendarEvent.findUnique({
+        where: { googleId: googleEvent.id }
+      })
+
+      const isNewEvent = !existingEvent
+
       await prisma.calendarEvent.upsert({
         where: { googleId: googleEvent.id },
         update: {
@@ -79,8 +86,45 @@ export class CalendarService {
         }
       })
 
+      // If this is a new event, trigger proactive instruction execution
+      if (isNewEvent) {
+        await this.triggerProactiveInstructions(userId, {
+          title: googleEvent.summary || 'No Title',
+          startTime,
+          endTime,
+          attendees
+        })
+      }
+
     } catch (error) {
       console.error(`Error syncing event ${googleEvent.id}:`, error)
+    }
+  }
+
+  private async triggerProactiveInstructions(userId: string, eventData: any) {
+    try {
+      // Dynamically import to avoid circular dependency
+      const { InstructionExecutor } = await import('./instruction-executor')
+      const executor = new InstructionExecutor()
+
+      // Get all NEW_CALENDAR_EVENT instructions
+      const instructions = await prisma.ongoingInstruction.findMany({
+        where: {
+          userId,
+          isActive: true,
+          triggerType: 'NEW_CALENDAR_EVENT'
+        }
+      })
+
+      // Execute each instruction using the AI-driven executor
+      for (const instruction of instructions) {
+        await executor.executeInstruction(userId, instruction, {
+          triggerType: 'NEW_CALENDAR_EVENT',
+          eventData
+        })
+      }
+    } catch (error) {
+      console.error('Error triggering proactive instructions:', error)
     }
   }
 
